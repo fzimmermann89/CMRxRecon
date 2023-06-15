@@ -1,0 +1,56 @@
+[build-system]
+requires = ["setuptools>=42", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "cmrxrecon"
+version = "0.0.1"
+description = "challenge submission."
+readme = "README"
+requires-python = ">=3.9"
+license = { file = "LICENSE" }
+authors = [
+    { name = "Felix Zimmermann", email = "felix.zimmermann@ptb.de" },
+    { name = "Andreas Kofler", email = "andreas.kofler@ptb.de" },
+]
+
+dependencies = ["numpy", "torch", "torchio", "h5py", "pytorch_lightning"]
+
+
+
+[project.urls]
+"repository" = "https://github.com/fzimmermann89/cmrxrecon"
+
+# MyPy section
+[tool.mypy]
+warn_return_any = "False"
+check_untyped_defs = "True"
+warn_no_return = "True"
+warn_unreachable = "True"
+exclude = ["docs"]
+
+# Black section
+[tool.black]
+line-length = 129
+target-version = ['py310']
+exclude = '''
+/(
+    \.git
+  | \.mypy_cache
+  | \.venv
+  | _build
+  | build
+  | dist
+)/
+'''
+
+# Isort section
+[tool.isort]
+profile = "black"
+line_length = 129
+sections = ["FUTURE", "STDLIB", "THIRDPARTY", "FIRSTPARTY", "LOCALFOLDER"]
+force_single_line = "True"
+
+[tool.pydocstyle]
+convention = "numpy"
+add_ignore = ["D107", "D205", "D415"]
