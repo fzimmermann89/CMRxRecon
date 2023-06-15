@@ -9,15 +9,15 @@ from neptune.new.types import File as neptuneFile
 class BasicUNet(pl.LightningModule):
     def __init__(self):
         super().__init__()
-        self.net = Unet(
+        self.net = torch.compile(Unet(
             dim=2.5,
             channels_in=21,
             channels_out=1,
             layer=4,
             filters=32,
             padding_mode="circular",
-            feature_growth=lambda d: (1.5, 1.33, 1, 1, 1, 1)[d],
-        )
+            feature_growth=lambda d: (2, 1.5, 1, 1, 1, 1)[d],
+        ))
 
     def forward(self, k: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
         x0 = torch.fft.ifftn(k, dim=(-2, -1), norm="ortho")
@@ -46,7 +46,7 @@ class BasicUNet(pl.LightningModule):
         prediction, rss = self(k, mask)
         loss = torch.nn.functional.mse_loss(prediction, gt)
         rss_loss = torch.nn.functional.mse_loss(rss, gt)
-        self.log("advantage", (rss_loss - loss) / rss_loss, on_step=True, on_epoch=True, prog_bar=True, logger=True)
+        self.log("train_advantage", (rss_loss - loss) / rss_loss, on_step=True, on_epoch=True, prog_bar=True, logger=True)
         self.log("train_loss", loss, on_step=True, on_epoch=True, prog_bar=False, logger=True)
         self.log("rss_loss", rss_loss, on_step=True, on_epoch=True, prog_bar=False, logger=True)
 
@@ -59,9 +59,11 @@ class BasicUNet(pl.LightningModule):
 
     def validation_step(self, batch, batch_idx):
         k, mask, gt = batch
-        prediction = self(k, mask)
+        prediction, rss = self(k, mask)
         loss = torch.nn.functional.mse_loss(prediction, gt)
-        self.log("val_loss", loss)
-
+        rss_loss = torch.nn.functional.mse_loss(rss, gt)
+        self.log("val_advantage", (rss_loss - loss) / rss_loss, on_step=True, on_epoch=True, prog_bar=True, logger=True)
+        self.log("val_loss", loss, on_step=True, on_epoch=True, prog_bar=False, logger=True)
+       
     def configure_optimizers(self):
         return torch.optim.AdamW(self.parameters(), lr=1e-3, weight_decay=1e-5)

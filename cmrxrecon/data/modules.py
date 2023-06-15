@@ -92,13 +92,21 @@ class CineData(pl.LightningDataModule):
             if self.singleslice:  # ignore number of slices
                 name = "_".join(name.split("_")[:-1])
             paths[name].append(sizepath)
-
+        
+        val_size=list(paths.keys())[0]
+        val_ds=paths[val_size][0]
+        if len(paths[val_size])>1:
+            paths[val_size]=paths[val_size][1:]
+        else:
+            del paths[val_size]
+        
         datasets = [
             CineDataDS(path, singleslice=self.singleslice, **self.kwargs)
             for path in paths.values()
         ]
 
         self.train_multidatasets = MultiDataSets(datasets)
+        self.val_dataset = CineDataDS(val_ds, singleslice=self.singleslice, **self.kwargs)
 
     # %%
 
@@ -113,12 +121,12 @@ class CineData(pl.LightningDataModule):
         )
 
     def val_dataloader(self):
-        # TODO
-        ...
+        return DataLoader(
+            self.val_dataset,
+            shuffle=False,
+            batch_size=1,
+        )
 
-    def test_dataloader(self):
-        # TODO
-        ...
 
     def teardown(self, stage: str):
         # Used to clean-up when the run is finished
