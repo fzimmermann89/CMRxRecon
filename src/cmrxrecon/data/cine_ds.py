@@ -4,24 +4,14 @@ from pathlib import Path
 import numpy as np
 import torch
 from typing import Tuple
-
-
-def create_mask(lines, center_lines, acceleration, offset):
-    center = lines // 2
-    mask = np.zeros(lines, dtype=bool)
-    mask[offset::acceleration] = 1
-    mask[center - center_lines // 2 : center + center_lines // 2] = 1
-    mask = np.fft.fftshift(mask)
-    return mask
+from .utils import create_mask
 
 
 class CineDataDS(Dataset):
     def __init__(
         self,
         path,
-        acceleration: Tuple[
-            int,
-        ] = (4,),
+        acceleration: Tuple[int,] = (4,),
         singleslice: bool = True,
         random_acceleration: bool = False,
         center_lines: int = 24,
@@ -70,18 +60,14 @@ class CineDataDS(Dataset):
             data = h5py.File(self.files[idx])["k"]
             gt = h5py.File(self.files[idx])["sos"]
 
-        acceleration = self.acceleration[
-            int(torch.randint(len(self.acceleration), size=(1,)))
-        ]
+        acceleration = self.acceleration[int(torch.randint(len(self.acceleration), size=(1,)))]
         if self.random_acceleration:
             offset = int(torch.randint(acceleration, size=(1,)))
         else:
             offset = 0
         lines = data.shape[-5]
         mask = create_mask(lines, self.center_lines, acceleration, offset)
-        tmp = torch.view_as_complex(torch.as_tensor((data[:, mask]))).permute(
-            (3, 0, 2, 1, 4)
-        )
+        tmp = torch.view_as_complex(torch.as_tensor((data[:, mask]))).permute((3, 0, 2, 1, 4))
         k = torch.zeros(*tmp.shape[:3], lines, tmp.shape[-1], dtype=torch.complex64)
         k[:, :, :, mask, :] = tmp
         mask = torch.as_tensor(mask[None, None, None, :, None]).broadcast_to(k.shape)

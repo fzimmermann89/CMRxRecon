@@ -469,7 +469,7 @@ class EmbLayer(ABC):
         ...
 
 
-class ScaleAndShift(nn.Module,EmbLayer):
+class ScaleAndShift(nn.Module, EmbLayer):
     def __init__(self, emb_dim, filters, shift=True):
         super().__init__()
         self.project = nn.Linear(emb_dim, (1 + shift) * filters)
@@ -505,7 +505,6 @@ class ReshapeWrapper(nn.Module):
         self.channel_to_batch = channel_to_batch
 
     def forward(self, x):
-
         if self.channel_to_batch:
             xin = x.flatten(end_dim=1).unsqueeze(1)
         else:
@@ -535,7 +534,7 @@ def act(name: str = "ReLu"):
     elif name.lower() == "prelu":
         return nn.PReLU
     elif name.lower() == "leakyrelu" or name.lower() == "lrelu":
-        return nn.LeakyReLU
+        return partial(nn.LeakyReLU, inplace=True)
     elif name.lower() == "silu":
         return nn.SiLU
     elif name.lower() == "gelu":

@@ -16,6 +16,10 @@ class CineModel(pl.LightningModule, ABC):
         self.log("rss_loss", rss_loss, on_step=True, on_epoch=True, prog_bar=False, logger=True)
         return loss
 
+    def on_validation_start(self) -> None:
+        print("\n validation_start")
+        return super().on_validation_start()
+
     def validation_step(self, batch, batch_idx):
         k, mask, gt = batch
         prediction, rss, *_ = self(k, mask)

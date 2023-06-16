@@ -12,13 +12,13 @@ from .utils import MultiDataSets, MultiDataSetsSampler
 class CineData(pl.LightningDataModule):
     def __init__(
         self,
-        data_dir: str = "data/files/MultiCoil/Cine/ProcessedTrainingSet",
+        data_dir: str = "files/MultiCoil/Cine/ProcessedTrainingSet",
         axis: Literal["sax", "lax"] = "sax",
         batch_size: int = 4,
         augments: bool = False,
         singleslice: bool = True,
         center_lines: int = 24,
-        random_acceleration: bool = False,
+        random_acceleration: bool = True,
         acceleration: Tuple[int, ...] = (4,),
     ):
         super().__init__()
@@ -64,7 +64,7 @@ class CineData(pl.LightningDataModule):
         return DataLoader(
             self.train_multidatasets,
             batch_sampler=MultiDataSetsSampler(self.train_multidatasets.lenghts(), self.batch_size),
-            num_workers=4,
+            num_workers=8,
             pin_memory=True,
         )
 
@@ -73,6 +73,7 @@ class CineData(pl.LightningDataModule):
             self.val_dataset,
             shuffle=False,
             batch_size=1,
+            num_workers=4,
         )
 
     def teardown(self, stage: str):
