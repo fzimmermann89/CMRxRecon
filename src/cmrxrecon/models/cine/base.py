@@ -1,6 +1,6 @@
-import pytorch_lightning as pl
-from abc import ABC, abstractmethod
+from abc import ABC
 import torch
+import pytorch_lightning as pl
 from pytorch_lightning.loggers.neptune import NeptuneLogger
 from neptune.new.types import File as neptuneFile
 
