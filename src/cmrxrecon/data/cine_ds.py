@@ -15,6 +15,7 @@ class CineDataDS(Dataset):
         singleslice: bool = True,
         random_acceleration: bool = False,
         center_lines: int = 24,
+        return_csm: bool = False,
     ):
         """
         A Cine Dataset
@@ -23,11 +24,13 @@ class CineDataDS(Dataset):
         single slice: if true, return a single z-slice/view, otherwise return all for one subject
         random_acceleration: randomly choose offset for undersampling mask
         center_lines: ACS lines
+        return_csm: return coil sensitivity maps
 
         A sample consists of
             - undersampled k-data (shifted, k=0 is on the corner)
             - mask
             - RSS ground truth reconstruction
+            - coil sensitivity maps (optional)
 
         Order of Axes:
          (Coils, Slice/view, Time, Phase Enc. (undersampled), Frequency Enc. (fully sampled))
@@ -41,6 +44,7 @@ class CineDataDS(Dataset):
         self.acceleration = acceleration
         self.random_acceleration = random_acceleration
         self.center_lines = center_lines
+        self.return_csm = return_csm
 
     def __len__(self):
         if self.singleslice:
@@ -56,9 +60,13 @@ class CineDataDS(Dataset):
             slicenr = idx - self.accumslices[filenr - 1] if filenr > 0 else idx
             data = h5py.File(self.files[filenr])["k"][slicenr : slicenr + 1]
             gt = h5py.File(self.files[filenr])["sos"][slicenr : slicenr + 1]
+            if self.return_csm:
+                csm = h5py.File(self.files[filenr])["csm"][slicenr : slicenr + 1]
         else:
             data = h5py.File(self.files[idx])["k"]
             gt = h5py.File(self.files[idx])["sos"]
+            if self.return_csm:
+                csm = h5py.File(self.files[idx])["csm"]
 
         acceleration = self.acceleration[int(torch.randint(len(self.acceleration), size=(1,)))]
         if self.random_acceleration:
@@ -72,4 +80,7 @@ class CineDataDS(Dataset):
         k[:, :, :, mask, :] = tmp
         mask = torch.as_tensor(mask[None, None, None, :, None]).broadcast_to(k.shape)
         gt = torch.as_tensor(gt)
+        if self.return_csm:
+            csm = torch.as_tensor(csm).unsqueeze(2)
+            return k, mask, gt, csm
         return k, mask, gt

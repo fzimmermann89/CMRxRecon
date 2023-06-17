@@ -20,6 +20,7 @@ class CineData(pl.LightningDataModule):
         center_lines: int = 24,
         random_acceleration: bool = True,
         acceleration: Tuple[int, ...] = (4,),
+        return_csm: bool = False,
     ):
         super().__init__()
 
@@ -55,10 +56,12 @@ class CineData(pl.LightningDataModule):
         else:
             del paths[val_size]
 
-        datasets = [CineDataDS(path, singleslice=self.singleslice, **self.kwargs) for path in paths.values()]
+        datasets = [
+            CineDataDS(path, singleslice=self.singleslice, return_csm=return_csm**self.kwargs) for path in paths.values()
+        ]
 
         self.train_multidatasets = MultiDataSets(datasets)
-        self.val_dataset = CineDataDS(val_ds, singleslice=self.singleslice, **self.kwargs)
+        self.val_dataset = CineDataDS(val_ds, singleslice=self.singleslice, return_csm=return_csm, **self.kwargs)
 
     def train_dataloader(self):
         return DataLoader(
