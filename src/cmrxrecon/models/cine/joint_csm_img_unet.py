@@ -19,7 +19,7 @@ class ImgUNetSequence(nn.Module):
 
     """
 
-    def __init__(self, net_xyz, net_xyt):
+    def __init__(self, net_xyt, net_xyz=None):
         super().__init__()
 
         self.net_xyt = net_xyt
@@ -31,20 +31,18 @@ class ImgUNetSequence(nn.Module):
         # change to real view
         x = torch.view_as_real(x)
 
-        # from 4D to 3D (2D + time)
+        # 2d + time unet
         x = einops.rearrange(x, "b z t y x ch -> (b z) ch y x t")
-
-        # apply spatio-temporal NN
         x = x + self.net_xyt(x)
 
-        # switch time and slices dimensions; i.e. to three spatial dimensions)
-        x = einops.rearrange(x, "(b z) ch y x t -> (b t) ch y x z", b=Nb)
-
-        # apply 3D spatial NN
-        x = x + self.net_xyz(x)
-
-        # change back to original shape and complex view
-        x = torch.view_as_complex(einops.rearrange(x, "(b t) ch y x z -> b z t y x ch", b=Nb).contiguous())
+        if self.net_xyz is not None:
+            # xyz unet
+            x = einops.rearrange(x, "(b z) ch y x t -> (b t) ch y x z", b=Nb)
+            x = x + self.net_xyz(x)
+            x = torch.view_as_complex(einops.rearrange(x, "(b t) ch y x z -> b z t y x ch", b=Nb).contiguous())
+        else:
+            # change back to original shape and complex view
+            x = torch.view_as_complex(einops.rearrange(x, "(b z) ch y x t -> b z t y x ch", b=Nb).contiguous())
 
         return x
 
@@ -80,15 +78,15 @@ class JointCSMImageReconNN(nn.Module):
             p_csm = self.net_csm(k)
 
         # RSS recon
-        xrss = self.EncObj.apply_RSS(k)
+        xrss = self.EncObj.apply_RSS(k)  # (batch, z, t, undersampled, fullysampled)
 
         # zerof filled reconstruction, i.e. A^H y with the estimated csms
-        AHy = self.EncObj.apply_AH(k, csm, mask)
+        AHy = self.EncObj.apply_AH(k, csm, mask)  # (batch, coils, z, t, undersampled, fullysampled)
 
         # approximately solve the normal equations to get a better
         # initialization for the image
         AHA = lambda x: self.EncObj.apply_AHA(x, csm, mask)
-        xneq = conj_grad(AHA, AHy, AHy, niter=4)
+        xneq = conj_grad(AHA, AHy, AHy, niter=4)  # (batch, coils, z, t, undersampled, fullysampled)
 
         # create x0 = r * exp(i * phi)
         # with r = xrss (magnitude image) and phi = angle(xneq),
@@ -96,7 +94,7 @@ class JointCSMImageReconNN(nn.Module):
         x = xrss * torch.exp(1j * xneq.angle())
 
         # apply CNN
-        x = self.net_img(x)
+        x = self.net_img(x)  # (batch, coils, z, t undersampled, fullysampled)
 
         # apply (full) forward model with estimated csms to xcnn
         p_k = self.EncObj.apply_A(x, csm, mask=None)
@@ -113,8 +111,8 @@ class JointCSMImageRecon(CineModel):
         super().__init__()
         net_img = ImgUNetSequence(
             # TODO: choose parameters
-            net_xyz=Unet(3, channels_in=2, channels_out=2, layer=3, filters=8),
             net_xyt=Unet(3, channels_in=2, channels_out=2, layer=3, filters=8),
+            # net_xyz=Unet(3, channels_in=2, channels_out=2, layer=3, filters=8), #todo: fix z dimension
         )
         Ncoils = 10
         net_csm = CSM_refine(
@@ -140,6 +138,22 @@ class JointCSMImageRecon(CineModel):
         return loss
 
     def forward(self, k: torch.Tensor, mask: torch.Tensor, csm: torch.Tensor) -> tuple[torch.Tensor, ...]:
+        """
+        JointCSMImageRecon
+
+        Parameters
+        ----------
+        k
+            shape: (batch, coils, z, t, undersampled, fullysampled)
+        mask
+            shape: (batch, z, t, undersampled, fullysampled)
+        csm
+            shape: (batch, coils, z, undersampled, fullysampled)
+
+        Returns
+        -------
+            x, ..., rss
+        """
         return self.net(k, mask, csm)
 
     def configure_optimizers(self):

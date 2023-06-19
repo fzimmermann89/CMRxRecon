@@ -28,13 +28,13 @@ class CineDataDS(Dataset):
 
         A sample consists of
             - undersampled k-data (shifted, k=0 is on the corner)
-            - mask
-            - coil sensitivity maps (optional)
+            - mask (z, t, x, y)
+            - coil sensitivity maps (optional) (c, z, x, y)
             - RSS ground truth reconstruction
 
 
         Order of Axes:
-         (Coils, Slice/view, Time, Phase Enc. (undersampled), Frequency Enc. (fully sampled))
+         (Coils , Slice/view, Time, Phase Enc. (undersampled), Frequency Enc. (fully sampled))
         """
         if isinstance(path, (str, Path)):
             path = [Path(path)]
@@ -83,7 +83,7 @@ class CineDataDS(Dataset):
         k = torch.zeros(*tmp.shape[:3], lines, tmp.shape[-1], dtype=torch.complex64)
         k[:, :, :, mask, :] = tmp
 
-        mask = torch.as_tensor(mask[None, None, None, :, None]).broadcast_to(k.shape)
+        mask = torch.as_tensor(mask[None, None, :, None])
         gt = torch.as_tensor(gt)
 
         if self.return_csm:

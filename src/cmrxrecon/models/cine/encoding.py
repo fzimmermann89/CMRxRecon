@@ -19,7 +19,7 @@ class Dyn2DCartEncObj(nn.Module):
 
     def __init__(self, norm="ortho"):
         self.norm = norm
-        super(Dyn2DCartEncObj, self).__init__()
+        super().__init__()
 
     def apply_C(self, x, csm):
         return csm.unsqueeze(3) * x.unsqueeze(1)
