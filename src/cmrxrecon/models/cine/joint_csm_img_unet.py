@@ -5,6 +5,7 @@ from cmrxrecon.nets.unet import Unet
 from .cg import conj_grad
 from . import CineModel
 from .csm import CSM_refine
+from .encoding import Dyn2DCartEncObj
 
 
 class ImgUNetSequence(nn.Module):
@@ -34,13 +35,13 @@ class ImgUNetSequence(nn.Module):
         x = einops.rearrange(x, "b z t y x ch -> (b z) ch y x t")
 
         # apply spatio-temporal NN
-        x = self.net_xyt(x)
+        x = x + self.net_xyt(x)
 
         # switch time and slices dimensions; i.e. to three spatial dimensions)
         x = einops.rearrange(x, "(b z) ch y x t -> (b t) ch y x z", b=Nb)
 
         # apply 3D spatial NN
-        x = self.net_xyz(x)
+        x = x + self.net_xyz(x)
 
         # change back to original shape and complex view
         x = torch.view_as_complex(einops.rearrange(x, "(b t) ch y x z -> b z t y x ch", b=Nb).contiguous())
@@ -74,9 +75,9 @@ class JointCSMImageReconNN(nn.Module):
         if self.needs_csm:
             if csm is None:
                 raise ValueError("csm is required for this network")
-            csm = self.net_csm(csm)
+            p_csm = self.net_csm(csm)
         else:
-            csm = self.net_csm(k)
+            p_csm = self.net_csm(k)
 
         # RSS recon
         xrss = self.EncObj.apply_RSS(k)
@@ -98,18 +99,43 @@ class JointCSMImageReconNN(nn.Module):
         x = self.net_img(x)
 
         # apply (full) forward model with estimated csms to xcnn
-        kest = self.EncObj.apply_A(x, csm, mask=None)
+        p_k = self.EncObj.apply_A(x, csm, mask=None)
 
         # estimated image using RSS
-        # xest = self.Dyn2DEncObj.apply_RSS(kest)
-        xest = x.abs()
+        p_x = self.EncObj.apply_RSS(p_k)
+        # p_x = x.abs()
 
-        return xest, kest, csm
+        return p_x, p_k, p_csm, xrss
 
 
 class JointCSMImageRecon(CineModel):
     def __init__(self):
-        self.net = JointCSMImageReconNN()
+        net_img = ImgUNetSequence(
+            # TODO: choose parameters
+            net_xyz=Unet(3, channels_in=2, channels_out=2, layer=3, filters=8),
+            net_xyt=Unet(3, channels_in=2, channels_out=2, layer=3, filters=8),
+        )
+        Ncoils = 10
+        net_csm = CSM_refine(
+            Unet(
+                2,
+                channels_in=2 * Ncoils,
+                channels_out=2 * Ncoils,
+                layer=2,
+                filters=32,
+            )
+        )
+        self.net = JointCSMImageReconNN(EncObj=Dyn2DCartEncObj, net_img=net_img, net_csm=net_csm, needs_csm=True)
+
+    def training_step(self, batch, batch_idx):
+        k, mask, csm, *other, gt = batch
+        prediction, p_k, p_csm, rss = self(k, mask, csm)
+        loss = torch.nn.functional.mse_loss(prediction, gt)
+        rss_loss = torch.nn.functional.mse_loss(rss, gt)
+        self.log("train_advantage", (rss_loss - loss) / rss_loss, on_step=True, on_epoch=True, prog_bar=True, logger=True)
+        self.log("train_loss", loss, on_step=True, on_epoch=True, prog_bar=False, logger=True)
+        self.log("rss_loss", rss_loss, on_step=True, on_epoch=True, prog_bar=False, logger=True)
+        return loss
 
     def forward(self, k: torch.Tensor, mask: torch.Tensor, csm: torch.Tensor) -> torch.Tensor:
         return self.net(k, mask, csm)
