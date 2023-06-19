@@ -79,7 +79,7 @@ class CineData(pl.LightningDataModule):
         else:
             del paths[val_size]
 
-        datasets = [CineDataDS(path, singleslice=self.singleslice, return_csm=return_csm**self.kwargs) for path in paths.values()]
+        datasets = [CineDataDS(path, singleslice=self.singleslice, return_csm=return_csm, **self.kwargs) for path in paths.values()]
 
         self.train_multidatasets = MultiDataSets(datasets)
         self.val_dataset = CineDataDS(val_ds, singleslice=self.singleslice, return_csm=return_csm, **self.kwargs)

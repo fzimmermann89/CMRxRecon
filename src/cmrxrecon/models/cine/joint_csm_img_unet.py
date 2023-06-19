@@ -110,6 +110,7 @@ class JointCSMImageReconNN(nn.Module):
 
 class JointCSMImageRecon(CineModel):
     def __init__(self):
+        super().__init__()
         net_img = ImgUNetSequence(
             # TODO: choose parameters
             net_xyz=Unet(3, channels_in=2, channels_out=2, layer=3, filters=8),
@@ -117,6 +118,7 @@ class JointCSMImageRecon(CineModel):
         )
         Ncoils = 10
         net_csm = CSM_refine(
+            # TODO: choose parameters
             Unet(
                 2,
                 channels_in=2 * Ncoils,
@@ -125,7 +127,7 @@ class JointCSMImageRecon(CineModel):
                 filters=32,
             )
         )
-        self.net = JointCSMImageReconNN(EncObj=Dyn2DCartEncObj, net_img=net_img, net_csm=net_csm, needs_csm=True)
+        self.net = JointCSMImageReconNN(EncObj=Dyn2DCartEncObj(), net_img=net_img, net_csm=net_csm, needs_csm=True)
 
     def training_step(self, batch, batch_idx):
         k, mask, csm, *other, gt = batch
@@ -137,7 +139,7 @@ class JointCSMImageRecon(CineModel):
         self.log("rss_loss", rss_loss, on_step=True, on_epoch=True, prog_bar=False, logger=True)
         return loss
 
-    def forward(self, k: torch.Tensor, mask: torch.Tensor, csm: torch.Tensor) -> torch.Tensor:
+    def forward(self, k: torch.Tensor, mask: torch.Tensor, csm: torch.Tensor) -> tuple[torch.Tensor, ...]:
         return self.net(k, mask, csm)
 
     def configure_optimizers(self):

@@ -87,7 +87,7 @@ class CineDataDS(Dataset):
         gt = torch.as_tensor(gt)
 
         if self.return_csm:
-            csm = torch.as_tensor(csm).unsqueeze(2)
+            csm = torch.view_as_complex(torch.as_tensor(csm)).swapaxes(0, 1)
             return k, mask, csm, gt
 
         return k, mask, gt

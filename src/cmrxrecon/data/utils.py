@@ -7,7 +7,16 @@ from collections import defaultdict
 import numpy as np
 
 
-def create_mask(lines, center_lines, acceleration, offset):
+def create_mask(lines: int, center_lines: int, acceleration: int, offset: int = 0):
+    """
+    Create a mask for undersampling
+
+    Parameters:
+    lines: number of lines in k-space
+    center_lines: number of ACS lines
+    acceleration: acceleration factor
+    offset: offset for undersampling
+    """
     center = lines // 2
     mask = np.zeros(lines, dtype=bool)
     mask[offset::acceleration] = 1
@@ -17,6 +26,10 @@ def create_mask(lines, center_lines, acceleration, offset):
 
 
 class MultiDataSets(Dataset):
+    """
+    Wrapper for multiple datasets
+    """
+
     def __init__(self, datasets: tuple[Dataset]):
         super().__init__()
         self.datasets = datasets
@@ -32,6 +45,11 @@ class MultiDataSets(Dataset):
 
 
 class MultiDataSetsSampler(torch.utils.data.Sampler):
+    """
+    Sampler for MultiDataSets
+    samples from all datasets with batches always being sampled from the same dataset
+    """
+
     def __init__(self, lengths: tuple[int, ...], batch_size: int, droplast: bool = True):
         self.batch_size = batch_size
         self._lengths = lengths
