@@ -29,8 +29,9 @@ class CineDataDS(Dataset):
         A sample consists of
             - undersampled k-data (shifted, k=0 is on the corner)
             - mask
-            - RSS ground truth reconstruction
             - coil sensitivity maps (optional)
+            - RSS ground truth reconstruction
+
 
         Order of Axes:
          (Coils, Slice/view, Time, Phase Enc. (undersampled), Frequency Enc. (fully sampled))
@@ -52,10 +53,11 @@ class CineDataDS(Dataset):
         else:
             return len(self.files)
 
-    def __getitem__(self, idx):
+    def __getitem__(self, idx) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor] | tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         if idx >= len(self):
             raise IndexError
         if self.singleslice:
+            # return a single slice for each subject
             filenr = np.argmax(self.accumslices > idx)
             slicenr = idx - self.accumslices[filenr - 1] if filenr > 0 else idx
             data = h5py.File(self.files[filenr])["k"][slicenr : slicenr + 1]
@@ -63,6 +65,7 @@ class CineDataDS(Dataset):
             if self.return_csm:
                 csm = h5py.File(self.files[filenr])["csm"][slicenr : slicenr + 1]
         else:
+            # return all slices for each subject
             data = h5py.File(self.files[idx])["k"]
             gt = h5py.File(self.files[idx])["sos"]
             if self.return_csm:
@@ -75,12 +78,16 @@ class CineDataDS(Dataset):
             offset = 0
         lines = data.shape[-5]
         mask = create_mask(lines, self.center_lines, acceleration, offset)
+        # load only the lines that are needed
         tmp = torch.view_as_complex(torch.as_tensor((data[:, mask]))).permute((3, 0, 2, 1, 4))
         k = torch.zeros(*tmp.shape[:3], lines, tmp.shape[-1], dtype=torch.complex64)
         k[:, :, :, mask, :] = tmp
+
         mask = torch.as_tensor(mask[None, None, None, :, None]).broadcast_to(k.shape)
         gt = torch.as_tensor(gt)
+
         if self.return_csm:
             csm = torch.as_tensor(csm).unsqueeze(2)
-            return k, mask, gt, csm
+            return k, mask, csm, gt
+
         return k, mask, gt

@@ -23,6 +23,7 @@ class BasicUNet(CineModel):
         )
         self.input_coils = input_coils
         with torch.no_grad():
+            # initialize the last layer closer to zero
             self.net.last[0].weight *= 1e-1
             self.net.last[0].bias.zero_()
 
@@ -32,6 +33,7 @@ class BasicUNet(CineModel):
         norm = rss.max()
 
         if self.input_coils:
+            # input the coil reconstructions as channels alongsite the rss
             x0 = einops.rearrange(
                 torch.view_as_real(x0),
                 "b c z t x y r -> (b z) (r c) t x y",
@@ -42,13 +44,16 @@ class BasicUNet(CineModel):
                     einops.rearrange(rss, "b c z t x y -> (b z) c t x y"),
                 ),
                 1,
-            ) * (1 / norm)
+            ) * (
+                1 / norm
+            )  # normalize the input
         else:
+            # only input the rss as a channel
             x0 = einops.rearrange(rss, "b c z t x y -> (b z) c t x y") * (1 / norm)
         rss = rss.squeeze(1)
         x_net = self.net(x0)
         x_net = einops.rearrange(x_net, "(b z) c t x y -> b z (c t) x y", b=x0.shape[0], c=1)
-        pred = torch.add(rss, x_net, alpha=norm)
+        pred = torch.add(rss, x_net, alpha=norm)  # alpha unnormalizes the output
         return pred, rss
 
     def configure_optimizers(self):

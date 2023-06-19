@@ -22,6 +22,28 @@ class CineData(pl.LightningDataModule):
         acceleration: Tuple[int, ...] = (4,),
         return_csm: bool = False,
     ):
+        """
+        A Cine Datamodule
+        data_dir: Path(s) to h5 files
+        axis: sax or lax
+        batch_size: batch size
+        augments: use data augments
+        singleslice: if true, return a single z-slice/view, otherwise return all for one subject
+        center_lines: ACS lines
+        random_acceleration: randomly choose offset for undersampling mask
+        acceleration: tupe of acceleration factors to randomly choose from
+        return_csm: return coil sensitivity maps
+
+        A sample consists of
+            - undersampled k-data (shifted, k=0 is on the corner)
+            - mask
+            - coil sensitivity maps (optional)
+            - RSS ground truth reconstruction
+
+
+        Order of Axes:
+         (Coils, Slice/view, Time, Phase Enc. (undersampled), Frequency Enc. (fully sampled))
+        """
         super().__init__()
 
         self.data_dir = data_dir
@@ -49,6 +71,7 @@ class CineData(pl.LightningDataModule):
                 name = "_".join(name.split("_")[:-1])
             paths[name].append(sizepath)
 
+        # use first dataset as validation set
         val_size = list(paths.keys())[0]
         val_ds = paths[val_size][0]
         if len(paths[val_size]) > 1:
@@ -56,9 +79,7 @@ class CineData(pl.LightningDataModule):
         else:
             del paths[val_size]
 
-        datasets = [
-            CineDataDS(path, singleslice=self.singleslice, return_csm=return_csm**self.kwargs) for path in paths.values()
-        ]
+        datasets = [CineDataDS(path, singleslice=self.singleslice, return_csm=return_csm**self.kwargs) for path in paths.values()]
 
         self.train_multidatasets = MultiDataSets(datasets)
         self.val_dataset = CineDataDS(val_ds, singleslice=self.singleslice, return_csm=return_csm, **self.kwargs)
