@@ -48,7 +48,7 @@ class ImgUNetSequence(nn.Module):
 
 
 class JointCSMImageReconNN(nn.Module):
-    def __init__(self, EncObj, net_img, net_csm, needs_csm=True):
+    def __init__(self, EncObj, net_img, net_csm, needs_csm: bool = True, normfactor: float = 1e3):
         """
         JointCSMImageReconNN
 
@@ -64,6 +64,7 @@ class JointCSMImageReconNN(nn.Module):
         self.net_img = net_img
         self.net_csm = net_csm
         self.needs_csm = needs_csm
+        self.normfactor = normfactor
 
     def forward(self, k: torch.Tensor, mask: torch.Tensor, csm: torch.Tensor = None) -> torch.Tensor:
         # y: (batch, coils, z, t, undersampled, fullysampled)
@@ -94,7 +95,7 @@ class JointCSMImageReconNN(nn.Module):
         x = xrss * torch.exp(1j * xneq.angle())
 
         # apply CNN
-        x = self.net_img(x)  # (batch, coils, z, t undersampled, fullysampled)
+        x = self.net_img(x * self.normfactor) * (1 / self.normfactor)  # (batch, coils, z, t undersampled, fullysampled)
 
         # apply (full) forward model with estimated csms to xcnn
         p_k = self.EncObj.apply_A(x, csm, mask=None)
@@ -109,11 +110,20 @@ class JointCSMImageReconNN(nn.Module):
 class JointCSMImageRecon(CineModel):
     def __init__(self):
         super().__init__()
+        # TODO: choose parameters
+
+        net_xyt = Unet(3, channels_in=2, channels_out=2, layer=3, filters=8)
+        net_xyz = None  # Unet(3, channels_in=2, channels_out=2, layer=3, filters=8), #todo: fix z dimension
+
+        with torch.no_grad():  # init close to identity
+            net_xyt.last[0].weight.data *= 1e-1
+            net_xyt.last[0].bias.zero_()
+
         net_img = ImgUNetSequence(
-            # TODO: choose parameters
-            net_xyt=Unet(3, channels_in=2, channels_out=2, layer=3, filters=8),
-            # net_xyz=Unet(3, channels_in=2, channels_out=2, layer=3, filters=8), #todo: fix z dimension
+            net_xyt=net_xyt,
+            net_xyz=net_xyz,
         )
+
         Ncoils = 10
         net_csm = CSM_refine(
             # TODO: choose parameters
@@ -127,7 +137,7 @@ class JointCSMImageRecon(CineModel):
         )
         self.net = JointCSMImageReconNN(EncObj=Dyn2DCartEncObj(), net_img=net_img, net_csm=net_csm, needs_csm=True)
 
-    def forward(self, data: dict) -> dict:
+    def forward(self, k: torch.Tensor, mask: torch.Tensor, csm: torch.Tensor = None, **other) -> dict:
         """
         JointCSMImageRecon
 
@@ -144,7 +154,7 @@ class JointCSMImageRecon(CineModel):
         -------
             x, ..., rss
         """
-        p_x, p_k, p_csm, xrss = self.net(data["k"], data["mask"], data["csm"] if "csm" in data else None)
+        p_x, p_k, p_csm, xrss = self.net(k, mask, csm)
         return dict(prediction=p_x, p_k=p_k, p_csm=p_csm, rss=xrss)
 
     def configure_optimizers(self):

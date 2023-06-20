@@ -8,8 +8,9 @@ from neptune.new.types import File as neptuneFile
 
 class CineModel(pl.LightningModule, ABC):
     def training_step(self, batch, batch_idx):
-        k, mask, *other, gt = batch
-        prediction, *_, rss = self(k, mask, *other)
+        gt = batch.pop("gt")
+        ret = self(**batch)
+        prediction, rss = ret["prediction"], ret["rss"]
         loss = torch.nn.functional.mse_loss(prediction, gt)
         rss_loss = torch.nn.functional.mse_loss(rss, gt)
         self.log("train_advantage", (rss_loss - loss) / rss_loss, on_step=True, on_epoch=True, prog_bar=True, logger=True)
@@ -22,8 +23,9 @@ class CineModel(pl.LightningModule, ABC):
         return super().on_validation_start()
 
     def validation_step(self, batch, batch_idx):
-        k, mask, *other, gt = batch
-        prediction, *_, rss = self(k, mask, *other)
+        gt = batch.pop("gt")
+        ret = self(**batch)
+        prediction, rss = ret["prediction"], ret["rss"]
         loss = torch.nn.functional.mse_loss(prediction, gt)
         rss_loss = torch.nn.functional.mse_loss(rss, gt)
         self.log("val_advantage", (rss_loss - loss) / rss_loss, on_step=True, on_epoch=True, prog_bar=True, logger=True)
@@ -36,3 +38,7 @@ class CineModel(pl.LightningModule, ABC):
                     img = img - img.min()
                     img = img / img.max()
                     logger.experiment["val/image"].log(neptuneFile.as_image(img))
+
+
+class TrainMixin_xrss(ABC):
+    ...

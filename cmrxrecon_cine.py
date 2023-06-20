@@ -19,7 +19,7 @@ if __name__ == "__main__":
         devices=[1],
         accumulate_grad_batches=4,
         check_val_every_n_epoch=None,
-        val_check_interval=20,
+        val_check_interval=250,
         max_steps=5000,
         max_epochs=None,
     )
