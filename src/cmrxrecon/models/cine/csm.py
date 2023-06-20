@@ -41,19 +41,19 @@ class CSM_refine(nn.Module):
 
     """
 
-    def __init__(self, net_csm:nn.Module):
+    def __init__(self, net_csm: nn.Module):
         super().__init__()
         self.net_csm = net_csm
 
-    def forward(self, csm:torch.Tensor):
+    def forward(self, csm: torch.Tensor):
         Nb = csm.shape[0]
-        
+
         # to real 2D input tensors
         csm = torch.view_as_real(csm)
         csm = einops.rearrange(csm, "b c z y x r -> (b z) (c r) y x")
 
         # apply cnn
-        csm = self.net_csm(csm)
+        csm = csm + self.net_csm(csm)
 
         # rearrange to complex
         csm = torch.view_as_complex(einops.rearrange(csm, "(b z) (c r) y x -> b c z y x r", b=Nb, r=2).contiguous())
