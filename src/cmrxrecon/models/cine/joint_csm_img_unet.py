@@ -127,17 +127,7 @@ class JointCSMImageRecon(CineModel):
         )
         self.net = JointCSMImageReconNN(EncObj=Dyn2DCartEncObj(), net_img=net_img, net_csm=net_csm, needs_csm=True)
 
-    def training_step(self, batch, batch_idx):
-        k, mask, csm, *other, gt = batch
-        prediction, p_k, p_csm, rss = self(k, mask, csm)
-        loss = torch.nn.functional.mse_loss(prediction, gt)
-        rss_loss = torch.nn.functional.mse_loss(rss, gt)
-        self.log("train_advantage", (rss_loss - loss) / rss_loss, on_step=True, on_epoch=True, prog_bar=True, logger=True)
-        self.log("train_loss", loss, on_step=True, on_epoch=True, prog_bar=False, logger=True)
-        self.log("rss_loss", rss_loss, on_step=True, on_epoch=True, prog_bar=False, logger=True)
-        return loss
-
-    def forward(self, k: torch.Tensor, mask: torch.Tensor, csm: torch.Tensor) -> tuple[torch.Tensor, ...]:
+    def forward(self, data: dict) -> dict:
         """
         JointCSMImageRecon
 
@@ -154,7 +144,8 @@ class JointCSMImageRecon(CineModel):
         -------
             x, ..., rss
         """
-        return self.net(k, mask, csm)
+        p_x, p_k, p_csm, xrss = self.net(data["k"], data["mask"], data["csm"] if "csm" in data else None)
+        return dict(prediction=p_x, p_k=p_k, p_csm=p_csm, rss=xrss)
 
     def configure_optimizers(self):
         optimizer = torch.optim.AdamW(self.parameters(), lr=3e-4, weight_decay=1e-5)

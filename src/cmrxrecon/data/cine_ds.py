@@ -82,12 +82,10 @@ class CineDataDS(Dataset):
         tmp = torch.view_as_complex(torch.as_tensor((data[:, mask]))).permute((3, 0, 2, 1, 4))
         k = torch.zeros(*tmp.shape[:3], lines, tmp.shape[-1], dtype=torch.complex64)
         k[:, :, :, mask, :] = tmp
-
         mask = torch.as_tensor(mask[None, None, :, None])
         gt = torch.as_tensor(gt)
-
+        ret = {"k": k, "mask": mask, "gt": gt}
         if self.return_csm:
-            csm = torch.view_as_complex(torch.as_tensor(csm)).swapaxes(0, 1)
-            return k, mask, csm, gt
-
-        return k, mask, gt
+            csm = torch.view_as_complex(torch.as_tensor(csm)).swapaxes(0, 1) if self.return_csm else None
+            ret["csm"] = csm
+        return ret

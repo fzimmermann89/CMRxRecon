@@ -27,7 +27,8 @@ class BasicUNet(CineModel):
             self.net.last[0].weight *= 1e-1
             self.net.last[0].bias.zero_()
 
-    def forward(self, k: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
+    def forward(self, data: dict) -> dict:
+        k = data["k"]
         x0 = torch.fft.ifftn(k, dim=(-2, -1), norm="ortho")
         rss = x0.abs().square().sum(1, keepdim=True).sqrt()
         norm = rss.max()
@@ -54,7 +55,7 @@ class BasicUNet(CineModel):
         x_net = self.net(x0)
         x_net = einops.rearrange(x_net, "(b z) c t x y -> b z (c t) x y", b=x0.shape[0], c=1)
         pred = torch.add(rss, x_net, alpha=norm)  # alpha unnormalizes the output
-        return pred, rss
+        return dict(prediction=pred, rss=rss)
 
     def configure_optimizers(self):
         optimizer = torch.optim.AdamW(self.parameters(), lr=3e-4, weight_decay=1e-5)
