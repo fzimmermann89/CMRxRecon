@@ -45,7 +45,7 @@ class CineData(pl.LightningDataModule):
          (Coils, Slice/view, Time, Phase Enc. (undersampled), Frequency Enc. (fully sampled))
         """
         super().__init__()
-
+        self.save_hyperparameters()
         self.data_dir = data_dir
         self.axis = axis
         self.batch_size = batch_size
