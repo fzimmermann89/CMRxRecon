@@ -7,7 +7,7 @@ from . import CineModel
 class BasicUNet(CineModel):
     def __init__(
         self,
-        input_coils=False,
+        input_coils=True,
     ):
         super().__init__()
         self.net = Unet(
@@ -27,8 +27,7 @@ class BasicUNet(CineModel):
             self.net.last[0].weight *= 1e-1
             self.net.last[0].bias.zero_()
 
-    def forward(self, data: dict) -> dict:
-        k = data["k"]
+    def forward(self, k: torch.Tensor, mask: torch.Tensor, **other) -> dict:
         x0 = torch.fft.ifftn(k, dim=(-2, -1), norm="ortho")
         rss = x0.abs().square().sum(1, keepdim=True).sqrt()
         norm = rss.max()
