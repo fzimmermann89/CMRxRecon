@@ -14,7 +14,7 @@ authors = [
     { name = "Andreas Kofler", email = "andreas.kofler@ptb.de" },
 ]
 
-dependencies = ["numpy", "torch", "h5py", "pytorch_lightning", "neptune-client", "tensorboard"]
+dependencies = ["numpy", "torch", "h5py", "pytorch_lightning", "neptune-client", "tensorboard", "einops", "sigpy"]
 
 
 
