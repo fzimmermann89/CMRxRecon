@@ -42,3 +42,9 @@ class ValidationMixin(pl.LightningModule, ABC):
 class CineModel(ValidationMixin, TrainingMixin_xrss, pl.LightningModule, ABC):
     def init(self):
         self.save_hyperparameters()
+
+    # on begin training
+    def on_train_start(self):
+        for logger in self.trainer.loggers:
+            # log name of the model and dataset
+            logger.log_hyperparams({"model": self.__class__.__name__, "dataset": self.trainer.datamodule.__class__.__name__})
