@@ -7,7 +7,7 @@ from typing import Tuple
 from .utils import create_mask
 
 
-class CineDataDS(Dataset):
+class MappingDataDS(Dataset):
     def __init__(
         self,
         path,
@@ -42,8 +42,8 @@ class CineDataDS(Dataset):
         """
         if isinstance(path, (str, Path)):
             path = [Path(path)]
-        self.files = sum([list(Path(p).rglob(f"P*.h5")) for p in path], [])
-        self.shapes = [(h5py.File(fn)["k"]).shape for fn in self.files]
+        self.filenames = sum([list(Path(p).rglob(f"P*.h5")) for p in path], [])
+        self.shapes = [(h5py.File(fn)["k"]).shape for fn in self.filenames]
         self.accumslices = np.cumsum(np.array([s[0] for s in self.shapes]))
         self.singleslice = singleslice
         self.acceleration = acceleration
@@ -56,43 +56,40 @@ class CineDataDS(Dataset):
         if self.singleslice:
             return self.accumslices[-1]
         else:
-            return len(self.files)
+            return len(self.filenames)
 
     def __getitem__(self, idx) -> dict[str, torch.Tensor]:
         if idx >= len(self):
             raise IndexError
-        if self.singleslice:
-            # return a single slice for each subject
-            filenr = np.argmax(self.accumslices > idx)
-            slicenr = idx - self.accumslices[filenr - 1] if filenr > 0 else idx
-            data = h5py.File(self.files[filenr])["k"][slicenr : slicenr + 1]
-            gt = h5py.File(self.files[filenr])["sos"][slicenr : slicenr + 1]
-            times = h5py.File(self.files[filenr])["times"][slicenr : slicenr + 1]
-            if self.return_csm:
-                csm = h5py.File(self.files[filenr])["csm"][slicenr : slicenr + 1]
-            if self.return_roi:
-                roi = h5py.File(self.files[filenr])["roi"][slicenr : slicenr + 1]
-        else:
-            # return all slices for each subject
-            data = h5py.File(self.files[idx])["k"]
-            gt = h5py.File(self.files[idx])["sos"]
-            times = h5py.File(self.files[idx])["times"]
-            if self.return_csm:
-                csm = h5py.File(self.files[idx])["csm"]
-            if self.return_roi:
-                roi = h5py.File(self.files[idx])["roi"]
 
         acceleration = self.acceleration[int(torch.randint(len(self.acceleration), size=(1,)))]
         if self.random_acceleration:
             offset = int(torch.randint(acceleration, size=(1,)))
         else:
             offset = 0
-        lines = data.shape[-5]
-        mask = create_mask(lines, self.center_lines, acceleration, offset)
-        # load only the lines that are needed
-        tmp = torch.view_as_complex(torch.as_tensor((data[:, mask]))).permute((3, 0, 2, 1, 4))
-        k = torch.zeros(*tmp.shape[:3], lines, tmp.shape[-1], dtype=torch.complex64)
-        k[:, :, :, mask, :] = tmp
+        filenr = np.argmax(self.accumslices > idx) if self.singleslice else idx
+        if self.singleslice:
+            # return a single slice for each subject
+            slicenr = idx - self.accumslices[filenr - 1] if filenr > 0 else idx
+            selection = slice(slicenr, slicenr + 1)
+        else:
+            # return all slices for each subject
+            selection = slice(None)
+
+        with h5py.File(self.filenames[filenr], "r") as file:
+            lines = file["k"].shape[-5]
+            mask = create_mask(lines, self.center_lines, acceleration, offset)
+            k_data = file["k"][selection, mask]
+            gt = file["sos"][selection]
+            times = file["times"][selection]
+            if self.return_csm:
+                csm = file["csm"][selection]
+            if self.return_roi:
+                roi = file["roi"][selection]
+
+        k_data = torch.view_as_complex(torch.as_tensor(k_data)).permute((3, 0, 2, 1, 4))
+        k = torch.zeros(*k_data.shape[:3], lines, k_data.shape[-1], dtype=torch.complex64)
+        k[:, :, :, mask, :] = k_data
         mask = torch.as_tensor(mask[None, None, :, None])
         gt = torch.as_tensor(gt)
         times = torch.as_tensor(times)
