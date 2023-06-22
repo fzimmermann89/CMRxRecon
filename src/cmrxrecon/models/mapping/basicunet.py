@@ -1,10 +1,10 @@
 import torch
 import einops
 from cmrxrecon.nets.unet import Unet
-from . import CineModel
+from . import MappingModel
 
 
-class BasicUNet(CineModel):
+class BasicUNet(MappingModel()):
     def __init__(
         self,
         input_coils=True,

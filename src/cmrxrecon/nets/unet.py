@@ -193,6 +193,12 @@ class Unet(nn.Module):
             self.residual = None
         self.emb_dim = emb_dim
 
+        with torch.no_grad():
+            self._init_weights()
+
+    def _init_weights(self):
+        self.last[-1].bias.zero_()
+
     def forward(self, x, emb=None):
         if self.emb_dim > 0 and emb is None:
             emb = torch.zeros(x.shape[0], self.emb_dim, dtype=x.dtype, device=x.device)

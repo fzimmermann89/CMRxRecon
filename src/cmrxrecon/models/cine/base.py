@@ -4,9 +4,10 @@ import torch
 import pytorch_lightning as pl
 from pytorch_lightning.loggers.neptune import NeptuneLogger
 from neptune.new.types import File as neptuneFile
+from torch.nn import init
 
 
-class CineModel(pl.LightningModule, ABC):
+class TrainingMixin_xrss(pl.LightningModule, ABC):
     def training_step(self, batch, batch_idx):
         gt = batch.pop("gt")
         ret = self(**batch)
@@ -18,10 +19,8 @@ class CineModel(pl.LightningModule, ABC):
         self.log("rss_loss", rss_loss, on_step=True, on_epoch=True, prog_bar=False, logger=True)
         return loss
 
-    def on_validation_start(self) -> None:
-        print("\n validation_start")
-        return super().on_validation_start()
 
+class ValidationMixin(pl.LightningModule, ABC):
     def validation_step(self, batch, batch_idx):
         gt = batch.pop("gt")
         ret = self(**batch)
@@ -40,5 +39,12 @@ class CineModel(pl.LightningModule, ABC):
                     logger.experiment["val/image"].log(neptuneFile.as_image(img))
 
 
-class TrainMixin_xrss(ABC):
-    ...
+class CineModel(ValidationMixin, TrainingMixin_xrss, pl.LightningModule, ABC):
+    def init(self):
+        self.save_hyperparameters()
+
+    # on begin training
+    def on_train_start(self):
+        for logger in self.trainer.loggers:
+            # log name of the model and dataset
+            logger.log_hyperparams({"model": self.__class__.__name__, "dataset": self.trainer.datamodule.__class__.__name__})
