@@ -97,6 +97,8 @@ def sigpy_espirit(k_centered: torch.Tensor, threshold: float = 0.00025, max_iter
     csm = [EspiritCalib(sample, max_iter=max_iter, thresh=threshold, show_pbar=False).run() for sample in k_centered]
     csm = np.array(csm)
     if fill:
+        # fill all-zero spatial regions (i.e. underdetermined areas) in the csms with
+        # 1/sqrt(Nc) * exp(1j * mean(angle(csm)))
         Nc = csm.shape[1]
         zeros = np.all(np.abs(csm) < 1e-6, axis=1)
         fills = np.sqrt(1 / Nc) * np.exp(1j * np.angle(csm).mean((-1, -2)))
