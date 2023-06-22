@@ -1,6 +1,8 @@
+from joblib.externals.cloudpickle import k
 import torch
 from torch import nn
 import einops
+import numpy as np
 
 
 class CSM_Sriram(nn.Module):
@@ -62,3 +64,42 @@ class CSM_refine(nn.Module):
         norm_factor = torch.pow(torch.sum(csm.conj() * csm, dim=1, keepdim=True), -0.5)
 
         return norm_factor * csm
+
+
+def sigpy_espirit(k_centered: torch.Tensor, threshold: float = 0.00025, max_iter: int = 250, fill: bool = True):
+    """
+    Calulate CSM from the k-space data using sigpy's espirit function
+
+    Parameters
+    ----------
+    k_centered
+        complex k-space data with k-space center lines in the center of the array
+        shape: (batch, coil, undersamped, fullysampled)
+    threshold
+        threshold for the espirit algorithm
+    max_iter
+        maximum number of iterations for the espirit algorithm
+    fill
+        if True, fill all-zero spatial regions in the csms with mean values
+
+    Returns
+    -------
+    csm
+        complex coil sensitivity maps
+        shape: (batch, coil, undersamped, fullysampled)
+    """
+
+    # coil sensitivity maps
+    from sigpy.mri.app import EspiritCalib
+
+    if isinstance(k_centered, torch.Tensor):
+        k_centered = k_centered.detach().cpu().numpy()
+    csm = [EspiritCalib(sample, max_iter=max_iter, thresh=threshold, show_pbar=False).run() for sample in k_centered]
+    csm = np.array(csm)
+    if fill:
+        Nc = csm.shape[1]
+        zeros = np.all(np.abs(csm) < 1e-6, axis=1)
+        fills = np.sqrt(1 / Nc) * np.exp(1j * np.angle(csm).mean((-1, -2)))
+        for c, f, m in zip(csm, fills, zeros):
+            c[:, m] = f[:, None]
+    return csm
