@@ -26,11 +26,11 @@ class CineDataDS(Dataset):
         center_lines: ACS lines
         return_csm: return coil sensitivity maps
 
-        A sample consists of
-            - undersampled k-data (shifted, k=0 is on the corner)
-            - mask (z, t, x, y)
-            - coil sensitivity maps (optional) (c, z, x, y)
-            - RSS ground truth reconstruction
+        A sample consists of a dict with
+            - k: undersampled k-data (shifted, k=0 is on the corner)
+            - mask: mask (z, t, x, y)
+            - csm: coil sensitivity maps (optional) (c, z, x, y)
+            - gt: RSS ground truth reconstruction
 
 
         Order of Axes:
@@ -53,7 +53,7 @@ class CineDataDS(Dataset):
         else:
             return len(self.files)
 
-    def __getitem__(self, idx) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor] | tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    def __getitem__(self, idx) -> dict[str, torch.Tensor]:
         if idx >= len(self):
             raise IndexError
         if self.singleslice:
