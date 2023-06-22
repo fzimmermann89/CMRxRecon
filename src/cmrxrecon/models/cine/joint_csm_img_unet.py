@@ -48,11 +48,8 @@ class ImgUNetSequence(nn.Module):
 
 
 class JointCSMImageReconNN(nn.Module):
-<<<<<<< HEAD
-    def __init__(self, EncObj, net_img, net_csm, needs_csm: bool = True, normfactor: float = 1e3, niter_cg: int = 8):
-=======
+
     def __init__(self, EncObj, net_img, net_csm, needs_csm: bool = True, normfactor: float = 1e2):
->>>>>>> 392c3e9c3bd6a5e03766f62d653180b3de940856
         """
         JointCSMImageReconNN
 
@@ -164,11 +161,7 @@ class JointCSMImageRecon(CineModel):
         return dict(prediction=p_x, p_k=p_k, p_csm=p_csm, rss=xrss)
 
     def configure_optimizers(self):
-<<<<<<< HEAD
-        optimizer = torch.optim.AdamW(self.parameters(), lr=1e-4, weight_decay=1e-12)
-=======
-        optimizer = torch.optim.AdamW(self.parameters(), lr=1e-3, weight_decay=1e-6)
->>>>>>> 392c3e9c3bd6a5e03766f62d653180b3de940856
+        optimizer = torch.optim.AdamW(self.parameters(), lr=1e-4, weight_decay=1e-6)
         return optimizer
         # # scheduler = torch.optim.lr_scheduler.OneCycleLR(
         # # 	optimizer, max_lr=3e-3, total_steps=self.trainer.estimated_stepping_batches, pct_start=0.05, anneal_strategy="cos", cycle_momentum=True, div_factor=30, final_div_factor=1e3, verbose=False
