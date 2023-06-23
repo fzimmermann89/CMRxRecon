@@ -29,4 +29,5 @@ if __name__ == "__main__":
         cmrxrecon.data.modules.CineData,
         subclass_mode_model=True,
         trainer_defaults=defaultargs,
+        auto_configure_optimizers=False,
     )

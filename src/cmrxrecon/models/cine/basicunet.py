@@ -5,10 +5,7 @@ from . import CineModel
 
 
 class BasicUNet(CineModel):
-    def __init__(
-        self,
-        input_coils=True,
-    ):
+    def __init__(self, input_coils=True, lr=3e-3):
         super().__init__()
         self.net = Unet(
             dim=2.5,
@@ -55,10 +52,3 @@ class BasicUNet(CineModel):
         x_net = einops.rearrange(x_net, "(b z) c t x y -> b z (c t) x y", b=x0.shape[0], c=1)
         pred = torch.add(rss, x_net, alpha=norm)  # alpha unnormalizes the output
         return dict(prediction=pred, rss=rss)
-
-    def configure_optimizers(self):
-        optimizer = torch.optim.AdamW(self.parameters(), lr=3e-4, weight_decay=1e-5)
-        scheduler = torch.optim.lr_scheduler.OneCycleLR(
-            optimizer, max_lr=3e-3, total_steps=self.trainer.estimated_stepping_batches, pct_start=0.05, anneal_strategy="cos", cycle_momentum=True, div_factor=30, final_div_factor=1e3, verbose=False
-        )
-        return [optimizer], [{"scheduler": scheduler, "interval": "step"}]
