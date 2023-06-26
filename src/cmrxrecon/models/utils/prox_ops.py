@@ -20,9 +20,9 @@ class ClipAct(nn.Module):
         return x
 
 
-class SoftShrinkAct_(nn.Module):
+class SoftShrinkAct(nn.Module):
     def __init__(self):
-        super(SoftShrinkAct_, self).__init__()
+        super(SoftShrinkAct, self).__init__()
 
     def forward(self, x, threshold):
         is_complex = x.is_complex()
