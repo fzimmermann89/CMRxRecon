@@ -7,7 +7,7 @@ import torch.nn.functional as F
 
 from src.cmrxrecon.mr_models.dyn2dcart import Dyn2DCartEncObj
 from src.cmrxrecon.models.cine.pdhg_plus_csms import PDHG4DynMRIwTVPlusCSMs
-from src.cmrxrecon.models.cine.cg import conj_grad
+from src.cmrxrecon.models.utils import conj_grad
 from src.cmrxrecon.data.cine_ds import CineDataDS
 
 data_type = 'loader'
