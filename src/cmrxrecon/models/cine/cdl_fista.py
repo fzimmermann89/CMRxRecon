@@ -4,7 +4,7 @@ import torch.nn.functional as F
 
 import numpy as np
 
-from cmrxrecon.models.cine.prox_ops import SoftShrinkAct
+from cmrxrecon.models.utils.prox_ops import SoftShrinkAct
 from cmrxrecon.models.utils.cg import conj_grad
 from cmrxrecon.models.utils.op_norm import power_iteration
 from cmrxrecon.models.utils.encoding import Dyn2DCartEncObj
@@ -140,8 +140,6 @@ class ConvDicoLearnFISTANN(nn.Module):
         
     def forward(self, y: torch.Tensor, csm: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
         
-        #print('nbatches = {}'.format(y.shape[0]))
-
         #initial recon
         AHy = self.Dyn2DEncObj.apply_AH(y, csm, mask)
         
@@ -199,15 +197,15 @@ class ConvDicoLearnFISTANN(nn.Module):
     
     
 class ConvDicoLearnFISTA(CineModel):
-    def __init__(self, lr=1e-4, schedule=False):
+    def __init__(self, lr=1e-5, schedule=False):
         super().__init__()
         # TODO: choose parameters
 
         self.cdl_fista = ConvDicoLearnFISTANN(Dyn2DCartEncObj(), 
-                                              T=8,
+                                              T=12,
                                               n_filters = 32,
                                               kernel_size = [7,7,7],
-                                              lambda_reg = 5e-7)
+                                              lambda_reg = 5e-2)
 
     def cdl_unit_norm_proj(self):
     	
@@ -244,7 +242,7 @@ class ConvDicoLearnFISTA(CineModel):
         gt = batch.pop("gt")
         ret = self(**batch)
         
-        self.cdl_unit_norm_proj()
+        #self.cdl_unit_norm_proj()
                 
         prediction, rss = ret["prediction"], ret["rss"]
         loss = torch.nn.functional.mse_loss(prediction, gt)
@@ -253,5 +251,10 @@ class ConvDicoLearnFISTA(CineModel):
         self.log("train_loss", loss, on_step=True, on_epoch=True, prog_bar=False, logger=True)
         self.log("rss_loss", rss_loss, on_step=True, on_epoch=True, prog_bar=False, logger=True)
         return loss 
-    
+
+    def optimizer_step(self, epoch, batch_idx, optimizer, optimizer_closure):
+        
+        optimizer.step(closure = optimizer_closure)
+        
+        self.cdl_unit_norm_proj()
 	
