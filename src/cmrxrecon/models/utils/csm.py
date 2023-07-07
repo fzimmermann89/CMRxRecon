@@ -1,7 +1,7 @@
-import torch
-from torch import nn
 import einops
 import numpy as np
+import torch
+from torch import nn
 
 
 class CSM_Sriram(nn.Module):
@@ -65,7 +65,7 @@ class CSM_refine(nn.Module):
         return norm_factor * csm
 
 
-def sigpy_espirit(k_centered: torch.Tensor, threshold: float = 0.00025, max_iter: int = 250, fill: bool = True):
+def sigpy_espirit(k_centered: torch.Tensor, threshold: float = 0.01, max_iter: int = 150, crop: float = 0.7, fill: bool = True):
     """
     Calulate CSM from the k-space data using sigpy's espirit function
 
@@ -78,8 +78,11 @@ def sigpy_espirit(k_centered: torch.Tensor, threshold: float = 0.00025, max_iter
         threshold for the espirit algorithm
     max_iter
         maximum number of iterations for the espirit algorithm
+    crop
+        cropping value for the espirit algorithm
     fill
         if True, fill all-zero spatial regions in the csms with mean values
+
 
     Returns
     -------
@@ -93,7 +96,7 @@ def sigpy_espirit(k_centered: torch.Tensor, threshold: float = 0.00025, max_iter
 
     if isinstance(k_centered, torch.Tensor):
         k_centered = k_centered.detach().cpu().numpy()
-    csm = [EspiritCalib(sample, max_iter=max_iter, thresh=threshold, show_pbar=False).run() for sample in k_centered]
+    csm = [EspiritCalib(sample, max_iter=max_iter, thresh=threshold, crop=crop, show_pbar=False).run() for sample in k_centered]
     csm = np.array(csm)
     if fill:
         # fill all-zero spatial regions (i.e. underdetermined areas) in the csms with
