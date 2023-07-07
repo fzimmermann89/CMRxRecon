@@ -16,6 +16,7 @@ import tqdm
 PATH = "/data/cardiac/files/MultiCoil/Cine/"
 THRESHOLD = 0.00025
 MAX_ITER = 250
+CROP = 0.95
 
 
 for view in ["lax", "sax"]:
@@ -32,7 +33,7 @@ for view in ["lax", "sax"]:
             )
 
             y = y.permute(0, 2, 1, 3)  # z, c, y, x
-            csm = [sp_mri.app.EspiritCalib(z_slice.numpy(), max_iter=MAX_ITER, thresh=THRESHOLD).run() for z_slice in y]
+            csm = [sp_mri.app.EspiritCalib(z_slice.numpy(), max_iter=MAX_ITER, thresh=THRESHOLD, crop=CROP).run() for z_slice in y]
             csm = np.stack(csm, axis=0)
             csm = np.stack([np.real(csm), np.imag(csm)], axis=-1)
 

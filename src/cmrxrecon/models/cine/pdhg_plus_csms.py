@@ -1,14 +1,12 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-
 import numpy as np
+from einops import rearrange
 
 from cmrxrecon.models.utils.grad_ops import GradOperators
 from cmrxrecon.models.utils.prox_ops import ClipAct
 from cmrxrecon.models.utils.cg import conj_grad
-
-from einops import rearrange
 
 
 class Laplace2DCSM(nn.Module):
@@ -58,7 +56,7 @@ class PDHG4DynMRIwTVPlusCSMs(nn.Module):
         lambda_reg_t=1e-6,
         lambda_reg_c=2e-7,
     ):
-        super(PDHG4DynMRIwTVPlusCSMs, self).__init__()
+        super().__init__()
 
         # MR encoding objects
         self.Dyn2DEncObj = Dyn2DEncObj

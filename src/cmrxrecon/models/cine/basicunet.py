@@ -5,7 +5,7 @@ from . import CineModel
 
 
 class BasicUNet(CineModel):
-    def __init__(self, input_coils=True, lr=3e-3):
+    def __init__(self, input_coils=True, lr=3e-3, weight_decay=1e-4, schedule=True):
         super().__init__()
         self.net = Unet(
             dim=2.5,
