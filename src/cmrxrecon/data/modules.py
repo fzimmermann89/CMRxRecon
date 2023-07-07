@@ -1,11 +1,11 @@
 from typing import Literal
-from .cine_ds import CineDataDS
+from .cine_ds import CineDataDS, CineTestDataDS
 from .mapping_ds import MappingDataDS
 from torch.utils.data import DataLoader, Dataset
 import torch
 from pathlib import Path
+from typing import Optional, Literal
 import pytorch_lightning as pl
-from typing import *
 from collections import defaultdict
 from .utils import MultiDataSets, MultiDataSetsSampler
 
@@ -13,15 +13,16 @@ from .utils import MultiDataSets, MultiDataSetsSampler
 class CineData(pl.LightningDataModule):
     def __init__(
         self,
-        data_dir: str = "files/MultiCoil/Cine/ProcessedTrainingSet",
-        axis: Literal["sax", "lax"] = "sax",
+        data_dir: Optional[str] = "files/MultiCoil/Cine/ProcessedTrainingSet",
+        axis: tuple[Literal["sax", "lax"], ...] | Literal["sax", "lax"] = "sax",
         batch_size: int = 4,
         augments: bool = False,
         singleslice: bool = True,
         center_lines: int = 24,
         random_acceleration: bool = True,
-        acceleration: Tuple[int, ...] = (4,),
+        acceleration: tuple[int, ...] = (4,),
         return_csm: bool = False,
+        test_data_dir: Optional[str] = "files/MultiCoil/Cine/ValidationSet",
     ):
         """
         A Cine Datamodule
@@ -46,11 +47,14 @@ class CineData(pl.LightningDataModule):
          (Coils, Slice/view, Time, Phase Enc. (undersampled), Frequency Enc. (fully sampled))
         """
         super().__init__()
+        if isinstance(axis, str):
+            axis = (axis,)
         self.save_hyperparameters()
         self.data_dir = data_dir
         self.axis = axis
         self.batch_size = batch_size
         self.singleslice = singleslice
+        self.return_csm = return_csm
         self.kwargs = dict(
             center_lines=center_lines,
             random_acceleration=random_acceleration,
@@ -60,32 +64,40 @@ class CineData(pl.LightningDataModule):
         if augments:
             raise NotImplementedError("Augments not implemented yet")
 
-        different_sizes = list((Path(self.data_dir) / self.axis).glob("*_*_*"))
+        if data_dir is not None and data_dir != "":
+            different_sizes = sum([list((Path(self.data_dir) / ax).glob("*_*_*")) for ax in self.axis], [])
 
-        if not different_sizes:
-            raise ValueError(f"No data found in {Path(self.data_dir).absolute()}")
+            if not different_sizes:
+                raise ValueError(f"No data found in {Path(self.data_dir).absolute()}")
 
-        paths = defaultdict(list)
-        for sizepath in different_sizes:
-            name = sizepath.name
-            if self.singleslice:  # ignore number of slices
-                name = "_".join(name.split("_")[:-1])
-            paths[name].append(sizepath)
+            paths = defaultdict(list)
+            for sizepath in different_sizes:
+                name = sizepath.name
+                if self.singleslice:  # ignore number of slices
+                    name = "_".join(name.split("_")[:-1])
+                paths[name].append(sizepath)
 
-        # use first dataset as validation set
-        val_size = list(paths.keys())[0]
-        val_ds = paths[val_size][0]
-        if len(paths[val_size]) > 1:
-            paths[val_size] = paths[val_size][1:]
+            # use first dataset as validation set
+            val_size = list(paths.keys())[0]
+            val_ds = paths[val_size][0]
+            if len(paths[val_size]) > 1:
+                paths[val_size] = paths[val_size][1:]
+            else:
+                del paths[val_size]
+
+            datasets = [CineDataDS(path, singleslice=self.singleslice, return_csm=return_csm, **self.kwargs) for path in paths.values()]
+
+            self.train_multidatasets = MultiDataSets(datasets)
+            self.val_dataset = CineDataDS(val_ds, singleslice=self.singleslice, return_csm=return_csm, **self.kwargs)
         else:
-            del paths[val_size]
-
-        datasets = [CineDataDS(path, singleslice=self.singleslice, return_csm=return_csm, **self.kwargs) for path in paths.values()]
-
-        self.train_multidatasets = MultiDataSets(datasets)
-        self.val_dataset = CineDataDS(val_ds, singleslice=self.singleslice, return_csm=return_csm, **self.kwargs)
+            self.train_multidatasets = None
+            self.val_dataset = None
+        if test_data_dir is not None and test_data_dir != "":
+            self.test_dataset = CineTestDataDS(test_data_dir, axis=self.axis, singleslice=self.singleslice, return_csm=self.return_csm)
 
     def train_dataloader(self):
+        if self.train_multidatasets is None:
+            raise ValueError("No training data available")
         return DataLoader(
             self.train_multidatasets,
             batch_sampler=MultiDataSetsSampler(self.train_multidatasets.lenghts(), self.batch_size),
@@ -94,8 +106,20 @@ class CineData(pl.LightningDataModule):
         )
 
     def val_dataloader(self):
+        if self.val_dataset is None:
+            raise ValueError("No validation data available")
         return DataLoader(
             self.val_dataset,
+            shuffle=False,
+            batch_size=1,
+            num_workers=4,
+        )
+
+    def test_dataset(self):
+        if self.test_dataset is None:
+            raise ValueError("No test data available")
+        return DataLoader(
+            self.test_dataset,
             shuffle=False,
             batch_size=1,
             num_workers=4,
@@ -110,13 +134,13 @@ class MappingData(pl.LightningDataModule):
     def __init__(
         self,
         data_dir: str = "files/MultiCoil/Mapping/ProcessedTrainingSet",
-        job: Literal["t1", "t2"] = "t1",
+        job: Literal["t1", "t2"] | tuple[Literal["t1", "t2"], ...] = "t1",
         batch_size: int = 4,
         augments: bool = False,
         singleslice: bool = True,
         center_lines: int = 24,
         random_acceleration: bool = True,
-        acceleration: Tuple[int, ...] = (4,),
+        acceleration: tuple[int, ...] = (4,),
         return_csm: bool = False,
         return_roi: bool = False,
     ):
@@ -161,7 +185,7 @@ class MappingData(pl.LightningDataModule):
         if augments:
             raise NotImplementedError("Augments not implemented yet")
 
-        different_sizes = list((Path(self.data_dir) / self.axis).glob("*_*_*"))
+        different_sizes = sum([list((Path(self.data_dir) / ax).glob("*_*_*")) for ax in self.axis], [])
 
         if not different_sizes:
             raise ValueError(f"No data found in {Path(self.data_dir).absolute()}")
