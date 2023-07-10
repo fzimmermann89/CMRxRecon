@@ -172,9 +172,9 @@ class CineTestDataDS(Dataset):
             k_data_centered = np.array(self._getdata(file)[:, selection]).view(np.complex64)  # (t,z,c,us,fs)
 
         k_data = self._shift(k_data_centered).transpose((2, 1, 0, 3, 4))  # (c,z,t,us,fs)
-
+        k_data = k_data.astype(np.complex64)
         mask = (~np.isclose(k_data[:1, ..., :, :1], 0)).astype(np.float32)
-        ret = {"k": k_data, "mask": mask, "sample": (filename, selection)}
+        ret = {"k": k_data, "mask": mask, "sample": [(filename, selection)]}
 
         if self.return_csm:
             csm = sigpy_espirit(k_data_centered[0])

@@ -37,6 +37,16 @@ class ValidationMixin(ABC):
                     logger.experiment["val/image"].log(neptuneFile.as_image(img))
 
 
+class TestPredictMixin(ABC):
+    def test_step(self, batch, batch_idx):
+        ret = self(**batch)
+        return ret["prediction"]
+
+    def predict_step(self, batch, batch_idx, dataloader_idx=None):
+        ret = self(**batch)
+        return ret["prediction"]
+
+
 class DefaultOptimizerMixin(ABC):
     def configure_optimizers(self):
         optimizer = torch.optim.AdamW(self.parameters(), lr=self.hparams.lr, weight_decay=self.hparams.weight_decay)
@@ -50,7 +60,7 @@ class DefaultOptimizerMixin(ABC):
             return optimizer
 
 
-class BaseModel(ValidationMixin, TrainingMixin_xrss, DefaultOptimizerMixin, pl.LightningModule, ABC):
+class BaseModel(ValidationMixin, TrainingMixin_xrss, TestPredictMixin, DefaultOptimizerMixin, pl.LightningModule, ABC):
     def __init__(self):
         super().__init__()
         self.save_hyperparameters()

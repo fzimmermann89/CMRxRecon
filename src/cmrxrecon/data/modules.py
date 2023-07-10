@@ -115,7 +115,7 @@ class CineData(pl.LightningDataModule):
             num_workers=4,
         )
 
-    def test_dataset(self):
+    def test_dataloader(self):
         if self.test_dataset is None:
             raise ValueError("No test data available")
         return DataLoader(
@@ -123,6 +123,24 @@ class CineData(pl.LightningDataModule):
             shuffle=False,
             batch_size=1,
             num_workers=4,
+            collate_fn=lambda batch: torch.utils.data._utils.collate.collate(
+                batch,
+                collate_fn_map={**torch.utils.data._utils.collate.default_collate_fn_map, tuple: lambda x, *args, **kwargs: x},
+            ),
+        )
+
+    def predict_dataloader(self):
+        if self.test_dataset is None:
+            raise ValueError("No test data available")
+        return DataLoader(
+            self.test_dataset,
+            shuffle=False,
+            batch_size=1,
+            num_workers=4,
+            collate_fn=lambda batch: torch.utils.data._utils.collate.collate(
+                batch,
+                collate_fn_map={**torch.utils.data._utils.collate.default_collate_fn_map, tuple: lambda x, *args, **kwargs: x},
+            ),
         )
 
     def teardown(self, stage: str):
