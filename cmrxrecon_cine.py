@@ -1,3 +1,4 @@
+from lightning_fabric import loggers
 from pytorch_lightning.cli import LightningCLI
 import cmrxrecon.data.modules
 import cmrxrecon.models.cine
@@ -6,17 +7,27 @@ import torch
 
 torch.set_float32_matmul_precision("medium")
 
-if __name__ == "__main__":
-    neptunelogger = NeptuneLogger(
-        project="ptb/cmrxrecon-cine",
-        log_model_checkpoints=False,
-    )
-    tensorboardlogger = TensorBoardLogger(".")
 
+class CLI(LightningCLI):
+    def before_instantiate_classes(self) -> None:
+        config = getattr(self.config, self.subcommand)
+        if self.subcommand in ["fit"]:
+            # logging only for certain subcommands
+            neptunelogger = NeptuneLogger(
+                project="ptb/cmrxrecon-cine",
+                log_model_checkpoints=False,
+            )
+            tensorboardlogger = TensorBoardLogger(".")
+            config.trainer.logger = [tensorboardlogger, neptunelogger]
+        else:
+            self.save_config_callback = None
+
+
+if __name__ == "__main__":
     defaultargs = dict(
-        logger=[tensorboardlogger, neptunelogger],
+        logger=False,
         log_every_n_steps=10,
-        devices=[1],
+        devices=[0],
         accumulate_grad_batches=4,
         check_val_every_n_epoch=None,
         val_check_interval=250,
@@ -24,7 +35,7 @@ if __name__ == "__main__":
         max_epochs=None,
     )
 
-    cli = LightningCLI(
+    cli = CLI(
         cmrxrecon.models.cine.CineModel,
         cmrxrecon.data.modules.CineData,
         subclass_mode_model=True,
