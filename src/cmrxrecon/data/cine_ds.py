@@ -169,12 +169,17 @@ class CineTestDataDS(Dataset):
         filename = self.filenames[filenr]
 
         with h5py.File(self.filenames[filenr], "r") as file:
-            k_data_centered = np.array(self._getdata(file)[:, selection]).view(np.complex64)  # (t,z,c,us,fs)
-
+            data = self._getdata(file)
+            shape = [data.shape[i] for i in (2, 1, 0, 3, 4)]
+            k_data_centered = np.array(data[:, selection]).view(np.complex64)  # (t,z,c,us,fs)
         k_data = self._shift(k_data_centered).transpose((2, 1, 0, 3, 4))  # (c,z,t,us,fs)
         k_data = k_data.astype(np.complex64)
         mask = (~np.isclose(k_data[:1, ..., :, :1], 0)).astype(np.float32)
-        ret = {"k": k_data, "mask": mask, "sample": [(filename, selection)]}
+        ret = {
+            "k": k_data,
+            "mask": mask,
+            "sample": (filename, selection, shape),
+        }
 
         if self.return_csm:
             csm = sigpy_espirit(k_data_centered[0])

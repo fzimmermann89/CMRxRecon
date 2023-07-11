@@ -185,8 +185,19 @@ class Unet(nn.Module):
 
         self.last = CBlock((features_enc[0][-1], channels_out), dim=dim, kernel_size=1, dropout=dropout_last, bias=bias_last, activation=None, groups=groups_last)
         if additional_last_decoder > 0:
-            self.last = block((features_enc[0][-1],) * (additional_last_decoder + 1)) + self.last
-
+            self.last = (
+                CBlock(
+                    (features_enc[0][-1],) * (additional_last_decoder + 1),
+                    dim=dim,
+                    kernel_size=kernel_size,
+                    bias=bias,
+                    padding=padding_mode != "none",
+                    activation=activation,
+                    padding_mode="zeros" if padding_mode == "none" else padding_mode,
+                    split_dim=half_dim,
+                )
+                + self.last
+            )
         if residual in ("outer", True, "both"):
             self.residual = nn.Identity() if channels_in == channels_out else ConvNd(dim)(channels_in, channels_out, kernel_size=1, bias=False)
         else:
