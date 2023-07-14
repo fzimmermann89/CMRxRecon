@@ -52,7 +52,7 @@ class DefaultOptimizerMixin(ABC):
         optimizer = torch.optim.AdamW(self.parameters(), lr=self.hparams.lr, weight_decay=self.hparams.weight_decay)
         if self.hparams.schedule:
             scheduler = torch.optim.lr_scheduler.OneCycleLR(
-                optimizer, max_lr=self.hparams.lr, total_steps=self.trainer.estimated_stepping_batches, pct_start=0.05, anneal_strategy="cos", cycle_momentum=True, div_factor=30, final_div_factor=1e3, verbose=False
+                optimizer, max_lr=self.hparams.lr, total_steps=self.trainer.estimated_stepping_batches, pct_start=0.01, anneal_strategy="cos", cycle_momentum=True, div_factor=10, final_div_factor=1e2, verbose=False
             )
             return [optimizer], [{"scheduler": scheduler, "interval": "step"}]
 
