@@ -4,8 +4,13 @@ import tempfile
 from pathlib import Path
 import h5py
 import numpy as np
-from math import ceil
+from math import ceil, floor
 import shutil
+
+
+def round(x):
+    # round half up like matlab
+    return floor(x + 0.5)
 
 
 def cropslice(oldshape, newshape) -> slice:
@@ -48,7 +53,7 @@ class OnlineValidationWriter(Callback):
             if resize:  # resize to 1/2 in y and 1/3 in x, keep 2 slices in z and 3 in t
                 sz, sy, sx = shape[1:]
                 if not sz < 3:
-                    to_keep_z = (ceil(sz / 2) - 2, ceil(sz / 2) - 1)  # slice indices to keep
+                    to_keep_z = (round(sz / 2) - 2, round(sz / 2) - 1)  # slice indices to keep
                     to_keep_t = (0, 1, 2)  # slice indices to keep
                     idx_z = []
                     save_slices = []
@@ -62,15 +67,20 @@ class OnlineValidationWriter(Callback):
                         continue
                     currentslices = tuple(save_slices)
                 # take instead of indexing to avoid collapsing dimensions
-                data = data.take(to_keep_t, 0).take(idx_z, 1).take(cropslice(sy, ceil(sy / 2)), 2).take(cropslice(sx, ceil(sx / 3)), 3)
-                shape = [len(to_keep_t), len(to_keep_z), ceil(shape[-2] / 2), ceil(shape[-1] / 3)]
+                data = data.take(to_keep_t, 0).take(idx_z, 1).take(cropslice(sy, round(sy / 2)), 2).take(cropslice(sx, round(sx / 3)), 3)
+                shape = [len(to_keep_t), len(to_keep_z), round(sy / 2), round(sx / 3)]
+
+            # swap order of axis according to error messages of validation script
+            shape = shape[::-1]
+            data = data.transpose()
 
             path = Path(self.tmpdir, *filename.parts[-6:])
             create_mat_file(path)
             with h5py.File(path, "a") as file:
                 if "img4ranking" not in file:
-                    file.create_dataset("img4ranking", shape=shape, dtype=np.float32)
-                file["img4ranking"][:, currentslices] = data
+                    ds = file.create_dataset("img4ranking", shape=shape, dtype=np.float32)
+                    ds.attrs["MATLAB_class"] = np.bytes_("single")
+                file["img4ranking"][..., currentslices, :] = data
 
     def on_test_batch_end(self, trainer, pl_module, outputs, batch, batch_idx, dataloader_idx=0) -> None:
         self.write_results(outputs, batch, resize=True)
