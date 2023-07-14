@@ -5,13 +5,13 @@ import torch.nn.functional as F
 from einops import rearrange
 
 from cmrxrecon.nets.unet_andreas import Unet
-
+from cmrxrecon.models.utils.crop import crops_by_threshold
 from . import CineModel
 
 from neptune.new.types import File as neptuneFile
 from pytorch_lightning.loggers.neptune import NeptuneLogger
 
-from cmrxrecon.models.utils import crops_by_threshold
+
 
 
 class MultiCoilDCLayer(nn.Module):
@@ -134,8 +134,8 @@ class CSMFreeReconNN(nn.Module):
         self.T = T
 
         self.mdcd = MultiCoilDCLayer()
-        #self.img_cnn = MultiCoilImageCNN(img_unet, mode) #
-        self.img_cnn = MultiCoilImageCNN_v2(img_unet, mode)
+        self.img_cnn = MultiCoilImageCNN(img_unet, mode) #
+        #self.img_cnn = MultiCoilImageCNN_v2(img_unet, mode)
         
         self.lambda_reg = torch.nn.Parameter(torch.log(torch.tensor([lambda_init])))
 
