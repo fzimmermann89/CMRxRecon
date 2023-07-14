@@ -19,6 +19,7 @@ class CineDataDS(Dataset):
         random_acceleration: bool = False,
         center_lines: int = 24,
         return_csm: bool = False,
+        normfactor: float = 1e4
     ):
         """
         A Cine Dataset
@@ -49,6 +50,7 @@ class CineDataDS(Dataset):
         self.random_acceleration = random_acceleration
         self.center_lines = center_lines
         self.return_csm = return_csm
+        self.normfactor = normfactor
 
     def __len__(self):
         if self.singleslice:
@@ -65,6 +67,7 @@ class CineDataDS(Dataset):
             offset = int(torch.randint(acceleration, size=(1,)))
         else:
             offset = 0
+        
         filenr = np.argmax(self.accumslices > idx) if self.singleslice else idx
         if self.singleslice:
             # return a single slice for each subject
@@ -77,6 +80,7 @@ class CineDataDS(Dataset):
         with h5py.File(self.filenames[filenr], "r") as file:
             lines = file["k"].shape[-5]
             mask = create_mask(lines, self.center_lines, acceleration, offset)
+            
             k_data = file["k"][selection, mask]
             gt = file["sos"][selection]
             if self.return_csm:
@@ -87,7 +91,7 @@ class CineDataDS(Dataset):
         k[:, :, :, mask, :] = k_data
         mask = torch.as_tensor(mask[None, None, :, None])
         gt = torch.as_tensor(gt)
-        ret = {"k": k, "mask": mask, "gt": gt}
+        ret = {"k": self.normfactor * k, "mask": mask, "gt": self.normfactor * gt}
         if self.return_csm:
             csm = torch.view_as_complex(torch.as_tensor(csm)).swapaxes(0, 1) if self.return_csm else None
             ret["csm"] = csm

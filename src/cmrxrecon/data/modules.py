@@ -23,6 +23,8 @@ class CineData(pl.LightningDataModule):
         acceleration: tuple[int, ...] = (4,),
         return_csm: bool = False,
         test_data_dir: Optional[str] = "files/MultiCoil/Cine/ValidationSet",
+        normfactor: float = 1e4
+
     ):
         """
         A Cine Datamodule
@@ -59,8 +61,9 @@ class CineData(pl.LightningDataModule):
             center_lines=center_lines,
             random_acceleration=random_acceleration,
             acceleration=acceleration,
+            normfactor = normfactor,
         )
-
+        self.normfactor=normfactor
         if augments:
             raise NotImplementedError("Augments not implemented yet")
 
