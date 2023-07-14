@@ -1,6 +1,7 @@
 from lightning_fabric import loggers
 from pytorch_lightning.cli import LightningCLI
 import cmrxrecon.data.modules
+from cmrxrecon.data.result_writer import OnlineValidationWriter
 import cmrxrecon.models.cine
 from pytorch_lightning.loggers import NeptuneLogger, TensorBoardLogger
 import torch
@@ -27,12 +28,13 @@ if __name__ == "__main__":
     defaultargs = dict(
         logger=False,
         log_every_n_steps=10,
-        devices=[0],
-        accumulate_grad_batches=4,
+        devices=[2],
+        accumulate_grad_batches=2,
         check_val_every_n_epoch=None,
         val_check_interval=250,
-        max_steps=5000,
+        max_steps=10000,
         max_epochs=None,
+        callbacks=[OnlineValidationWriter()],
     )
 
     cli = CLI(
