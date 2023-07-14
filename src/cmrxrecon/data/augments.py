@@ -1,20 +1,24 @@
 import torch
 from torch import nn
 
+
 class AugmentDataset(torch.utils.data.Dataset):
-    def __init__(self, dataset, augments:None|nn.Module|tuple[nn.Module,...]=None):
+    def __init__(self, dataset, augments: None | nn.Module | tuple[nn.Module, ...] = None):
         self.dataset = dataset
         if not isinstance(augments, nn.Module):
             augments = nn.Sequential(*augments)
         self.augments = augments
+
     def __len__(self):
         return len(self.dataset)
+
     def __getitem__(self, idx):
         x = self.dataset[idx]
         if self.augments is not None:
             x = self.augments(x)
         return x
-        
+
+
 class RandomFlipAlongDimensions(nn.Module):
     def __init__(self, p: float | tuple[float, ...] = 0.5, dim: int | tuple[int, ...] = (-1, -2)):
         """
@@ -68,14 +72,15 @@ class RandomKSpaceFlipAlongDimensions(nn.Module):
             if torch.rand(1) < p:
                 k = torch.fft(torch.fft(k, dim=d), dim=d, norm="forward")
         return k
-    
+
+
 class RandomKSpaceFlipAlongDimensionsIndirect(nn.Module):
-    def __init__(self, p: float | tuple[float, ...] = 0.5, otherdim: tuple[int, ...]):
+    def __init__(self, p: float | tuple[float, ...] = 0.5, otherdim: tuple[int, ...] = (-1,)):
         """
         Randomly flip along a dimension by flipping along all othre dimensions and complex conjugating.
         I.e. does ifft, flip along other dim, fft, complex conjugate.
         to simulate a flip along dim. otherdim must contain all reciprical dimensions except dim.
-        
+
         Parameters
         ----------
         p, default 0.5
@@ -92,12 +97,12 @@ class RandomKSpaceFlipAlongDimensionsIndirect(nn.Module):
         self.otherdim = dim
 
     def forward(self, k):
-        if torch.rand(1) < p:            
+        if torch.rand(1) < p:
             k = torch.fft(torch.fft(k, dim=self.otherdim), dim=self.otherdim, norm="forward").conj()
         return k
 
 
-class RandomShuffleAlongDimension(nn.Module):
+class RandomShuffleAlongDimensions(nn.Module):
     def __init__(self, p: float | tuple[float, ...] = 0.5, dim: int | tuple[int, ...] = (1,)):
         """
         Randomly shuffle along dimensions
@@ -141,6 +146,7 @@ class RandomConjugte(nn.Module):
             x = torch.conj(x)
         return x
 
+
 class RandomKFlipUndersampled(nn.Module):
     def __init__(self, p: float, dim_fullysampled: int, dim_undersampled: int):
         """
@@ -165,30 +171,31 @@ class RandomKFlipUndersampled(nn.Module):
         flip1, flip2 = torch.rand(2) < self.p
         if flip1 and flip2:
             # flip along both dimensions
-            k=k.conj()
+            k = k.conj()
         elif flip1:
             # flip along under sampled dimension only
             k = torch.fft(torch.fft(k, dim=self.dim_fullysampled), dim=self.dim_fullysampled, norm="forward")
-            k=k.conj()
+            k = k.conj()
         elif flip2:
             # flip along fully sampled dimension only
             k = torch.fft(torch.fft(k, dim=self.dim_fullysampled), dim=self.dim_fullysampled, norm="forward")
 
         return k
-    
-    class RandomPhase(nn.Module):
-        def __init__(self, p: float):
-            """
-            Randomly add a phase to the input
 
-            Parameters
-            ----------
-            p
-                Propability of adding a phase
-            """
-            self.p = p
-            
-        def forward(self, x):
-            if torch.rand(1) < self.p:
-                x = x * torch.exp(1j * torch.rand(1) * 2 * torch.pi)
-            return x
+
+class RandomPhase(nn.Module):
+    def __init__(self, p: float):
+        """
+        Randomly add a phase to the input
+
+        Parameters
+        ----------
+        p
+            Propability of adding a phase
+        """
+        self.p = p
+
+    def forward(self, x):
+        if torch.rand(1) < self.p:
+            x = x * torch.exp(1j * torch.rand(1) * 2 * torch.pi)
+        return x

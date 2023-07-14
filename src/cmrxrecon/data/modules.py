@@ -8,7 +8,7 @@ from typing import Optional, Literal
 import pytorch_lightning as pl
 from collections import defaultdict
 from .utils import MultiDataSets, MultiDataSetsSampler
-from .augments import RandomShuffleAlongDimension, RandomKFlipUndersampled, RandomPhase, RandomFlipAlongDimension, AugmentDataset
+from .augments import RandomShuffleAlongDimensions, RandomKFlipUndersampled, RandomPhase, RandomFlipAlongDimensions, AugmentDataset
 from functools import partial
 
 
@@ -71,8 +71,8 @@ class CineData(pl.LightningDataModule):
                 augments=(
                     RandomKFlipUndersampled(p=0.2, dim_fullysampled=-1, dim_undersampled=-2),  # flip along spatial dimensions
                     RandomPhase(p=0.2),  # random phase shift
-                    RandomShuffleAlongDimension(p=0.2, dim=0),  # shuffle coils
-                    RandomFlipAlongDimension(p=0.2, dim=-3),  # flip along time dimension
+                    RandomShuffleAlongDimensions(p=0.2, dim=0),  # shuffle coils
+                    RandomFlipAlongDimensions(p=0.2, dim=-3),  # flip along time dimension
                 ),
             )
         else:
