@@ -1,13 +1,95 @@
+from math import e
+from lightning_fabric.connector import _FSDP_ALIASES
 import torch
 from torch import nn
 
 
+class CineAugment:
+    def __init__(self, p_flip_spatial: float = 0.2, p_flip_temporal: float = 0.2, p_shuffle_coils: float = 0.2, p_phase: float = 0.2, flip_view: bool = False):
+        """
+        Augmentations for cine data
+             (Coils , Slice/view, Time, Phase Enc. (undersampled), Frequency Enc. (fully sampled))
+        """
+        self.p_flip_spatial = p_flip_spatial
+        self.p_flip_temporal = p_flip_temporal
+        self.p_phase = p_phase
+        self.p_shuffle_coils = p_shuffle_coils
+        self.flip_view = flip_view
+
+    def __call__(self, sample):
+        k = sample["k"]
+        gt = sample["gt"]
+        csm = sample.get("csm", None)
+        flippedx, flippedy, flippedz, flippedt = 0, 0, 0, 0
+        shuffled = 0
+        phase = 0.0
+        if torch.rand(1) < self.p_flip_spatial:
+            # flip along spatial dimensions
+            r = torch.rand(1)
+            if r < 1 / 3:  # flip along fully sampled dimension
+                k = torch.fft.fft(torch.fft.fft(k, dim=-1), dim=-1, norm="forward")
+                gt = torch.flip(gt, (-1,))
+                if csm is not None:
+                    csm = torch.flip(csm, (-1,))
+                flippedx = 1
+            elif r < 2 / 3:  # flip along y
+                k = torch.fft.fft(torch.fft.fft(k, dim=-1), dim=-1, norm="forward").conj()
+                gt = torch.flip(gt, (-2,))
+                if csm is not None:
+                    csm = torch.flip(csm, (-2,))
+                flippedy = 1
+            else:  # flip along x and y
+                k = k.conj()
+                gt = torch.flip(gt, (-2, -1))
+                if csm is not None:
+                    csm = torch.flip(csm, (-2, -1))
+                flippedy = 1
+                flippedx = 1
+            if k.shape[-4] > 1 and self.flip_view and torch.rand(1) > 0.5:
+                # flip along view dimension
+                k = torch.flip(k, (-4,))
+                gt = torch.flip(gt, (-4,))
+                if csm is not None:
+                    csm = torch.flip(csm, (-4,))
+                flippedz = 1
+
+        if torch.rand(1) < self.p_flip_temporal:
+            k = torch.flip(k, (-3,))
+            gt = torch.flip(gt, (-3,))
+            if csm is not None:
+                csm = torch.flip(csm, (-3,))
+            flippedt = 1
+
+        if torch.rand(1) < self.p_phase:
+            phase = torch.randn(1) * torch.pi
+            k = k * torch.exp(1j * phase)
+            if csm is not None:
+                csm = csm * phase
+
+        if torch.rand(1) < self.p_shuffle_coils:
+            shuffle = torch.randperm(k.shape[-5])
+            k = k[..., shuffle, :, :, :, :]
+            if csm is not None:
+                csm = csm[..., shuffle, :, :, :, :]
+            shuffled = 1
+
+        augmentinfo = torch.tensor([flippedx, flippedy, flippedz, flippedt, shuffled, phase])
+        sample["k"] = k
+        sample["gt"] = gt
+        sample["augmentinfo"] = augmentinfo
+        if csm is not None:
+            sample["csm"] = csm
+        return sample
+
+
 class AugmentDataset(torch.utils.data.Dataset):
-    def __init__(self, dataset, augments: None | nn.Module | tuple[nn.Module, ...] = None):
+    def __init__(self, dataset, augments: None | nn.Module | tuple[nn.Module, ...] = None, getter=lambda x: x, setter=lambda x, y: y):
         self.dataset = dataset
         if not isinstance(augments, nn.Module):
             augments = nn.Sequential(*augments)
         self.augments = augments
+        self.getter = getter
+        self.setter = setter
 
     def __len__(self):
         return len(self.dataset)
@@ -15,8 +97,14 @@ class AugmentDataset(torch.utils.data.Dataset):
     def __getitem__(self, idx):
         x = self.dataset[idx]
         if self.augments is not None:
-            x = self.augments(x)
+            x = self.setter(x, self.augments(self.getter(x)))
         return x
+
+    def __getattribute__(self, name):
+        if name in ("dataset", "augments", "getter", "setter"):
+            return super().__getattribute__(name)
+        else:
+            return getattr(self.dataset, name)
 
 
 class RandomFlipAlongDimensions(nn.Module):
@@ -70,7 +158,7 @@ class RandomKSpaceFlipAlongDimensions(nn.Module):
     def forward(self, k):
         for d, p in zip(self.dim, self.p):
             if torch.rand(1) < p:
-                k = torch.fft(torch.fft(k, dim=d), dim=d, norm="forward")
+                k = torch.fft.fft(torch.fft.fft(k, dim=d), dim=d, norm="forward")
         return k
 
 
@@ -98,7 +186,7 @@ class RandomKSpaceFlipAlongDimensionsIndirect(nn.Module):
 
     def forward(self, k):
         if torch.rand(1) < p:
-            k = torch.fft(torch.fft(k, dim=self.otherdim), dim=self.otherdim, norm="forward").conj()
+            k = torch.fft.fft(torch.fft.fft(k, dim=self.otherdim), dim=self.otherdim, norm="forward").conj()
         return k
 
 
@@ -125,7 +213,7 @@ class RandomShuffleAlongDimensions(nn.Module):
     def forward(self, x):
         for d, p in zip(self.dim, self.p):
             if torch.rand(1) < p:
-                x = x[(slice(None),) * d + torch.randperm(x.shape[d])]
+                x = x[(slice(None),) * d + ((torch.randperm(x.shape[d])),)]
         return x
 
 
@@ -139,6 +227,7 @@ class RandomConjugte(nn.Module):
         p
             Propability of complex conjugate
         """
+        super().__init__()
         self.p = p
 
     def forward(self, x):
@@ -163,6 +252,7 @@ class RandomKFlipUndersampled(nn.Module):
         dim_undersampled
             Dimension of the undersampled k-space
         """
+        super().__init__()
         self.p = p
         self.dim_fullysampled = dim_fullysampled
         self.dim_undersampled = dim_undersampled
@@ -174,11 +264,11 @@ class RandomKFlipUndersampled(nn.Module):
             k = k.conj()
         elif flip1:
             # flip along under sampled dimension only
-            k = torch.fft(torch.fft(k, dim=self.dim_fullysampled), dim=self.dim_fullysampled, norm="forward")
+            k = torch.fft.fft(torch.fft.fft(k, dim=self.dim_fullysampled), dim=self.dim_fullysampled, norm="forward")
             k = k.conj()
         elif flip2:
             # flip along fully sampled dimension only
-            k = torch.fft(torch.fft(k, dim=self.dim_fullysampled), dim=self.dim_fullysampled, norm="forward")
+            k = torch.fft.fft(torch.fft.fft(k, dim=self.dim_fullysampled), dim=self.dim_fullysampled, norm="forward")
 
         return k
 
@@ -193,6 +283,7 @@ class RandomPhase(nn.Module):
         p
             Propability of adding a phase
         """
+        super().__init__()
         self.p = p
 
     def forward(self, x):

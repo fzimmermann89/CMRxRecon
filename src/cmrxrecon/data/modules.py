@@ -25,7 +25,6 @@ class CineData(pl.LightningDataModule):
         acceleration: tuple[int, ...] = (4,),
         return_csm: bool = False,
         test_data_dir: Optional[str] = "files/MultiCoil/Cine/ValidationSet",
-        normfactor: float = 1e4,
     ):
         """
         A Cine Datamodule
@@ -62,21 +61,8 @@ class CineData(pl.LightningDataModule):
             center_lines=center_lines,
             random_acceleration=random_acceleration,
             acceleration=acceleration,
-            normfactor=normfactor,
         )
-        self.normfactor = normfactor
-        if augments:
-            augmentwrapper = partial(
-                AugmentDataset,
-                augments=(
-                    RandomKFlipUndersampled(p=0.2, dim_fullysampled=-1, dim_undersampled=-2),  # flip along spatial dimensions
-                    RandomPhase(p=0.2),  # random phase shift
-                    RandomShuffleAlongDimensions(p=0.2, dim=0),  # shuffle coils
-                    RandomFlipAlongDimensions(p=0.2, dim=-3),  # flip along time dimension
-                ),
-            )
-        else:
-            augmentwrapper = lambda x: x
+
         if data_dir is not None and data_dir != "":
             different_sizes = sum([list((Path(self.data_dir) / ax).glob("*_*_*")) for ax in self.axis], [])
 
@@ -98,9 +84,9 @@ class CineData(pl.LightningDataModule):
             else:
                 del paths[val_size]
 
-            datasets = [CineDataDS(path, singleslice=self.singleslice, return_csm=return_csm, **self.kwargs) for path in paths.values()]
+            datasets = [CineDataDS(path, singleslice=self.singleslice, return_csm=return_csm, augments=augments, **self.kwargs) for path in paths.values()]
 
-            self.train_multidatasets = augmentwrapper(MultiDataSets(datasets))
+            self.train_multidatasets = MultiDataSets(datasets)
             self.val_dataset = CineDataDS(val_ds, singleslice=self.singleslice, return_csm=return_csm, **self.kwargs)
         else:
             self.train_multidatasets = None
