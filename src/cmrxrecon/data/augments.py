@@ -5,7 +5,7 @@ from torch import nn
 
 
 class CineAugment:
-    def __init__(self, p_flip_spatial: float = 0.2, p_flip_temporal: float = 0.2, p_shuffle_coils: float = 0.2, p_phase: float = 0.2, flip_view: bool = False):
+    def __init__(self, p_flip_spatial: float = 0.4, p_flip_temporal: float = 0.2, p_shuffle_coils: float = 0.2, p_phase: float = 0.2, flip_view: bool = False):
         """
         Augmentations for cine data
              (Coils , Slice/view, Time, Phase Enc. (undersampled), Frequency Enc. (fully sampled))
@@ -61,7 +61,7 @@ class CineAugment:
             flippedt = 1
 
         if torch.rand(1) < self.p_phase:
-            phase = torch.randn(1) * torch.pi
+            phase = (2 * torch.pi + (0.1 * torch.randn(1))) % 2 * torch.pi
             k = k * torch.exp(1j * phase)
             if csm is not None:
                 csm = csm * phase

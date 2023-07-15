@@ -111,7 +111,7 @@ class CineData(pl.LightningDataModule):
             self.val_dataset,
             shuffle=False,
             batch_size=1,
-            num_workers=4,
+            num_workers=8,
         )
 
     def test_dataloader(self):
@@ -121,7 +121,7 @@ class CineData(pl.LightningDataModule):
             self.test_dataset,
             shuffle=False,
             batch_size=1,
-            num_workers=4,
+            num_workers=8,
             collate_fn=lambda batch: torch.utils.data._utils.collate.collate(
                 batch,
                 collate_fn_map={**torch.utils.data._utils.collate.default_collate_fn_map, tuple: lambda x, *args, **kwargs: x},
@@ -135,7 +135,7 @@ class CineData(pl.LightningDataModule):
             self.test_dataset,
             shuffle=False,
             batch_size=1,
-            num_workers=4,
+            num_workers=8,
             collate_fn=lambda batch: torch.utils.data._utils.collate.collate(
                 batch,
                 collate_fn_map={**torch.utils.data._utils.collate.default_collate_fn_map, tuple: lambda x, *args, **kwargs: x},
@@ -231,6 +231,7 @@ class MappingData(pl.LightningDataModule):
         return DataLoader(
             self.train_multidatasets,
             batch_sampler=MultiDataSetsSampler(self.train_multidatasets.lenghts(), self.batch_size),
+            shuffle=True,
             num_workers=8,
             pin_memory=True,
         )
@@ -240,7 +241,7 @@ class MappingData(pl.LightningDataModule):
             self.val_dataset,
             shuffle=False,
             batch_size=1,
-            num_workers=4,
+            num_workers=8,
         )
 
     def teardown(self, stage: str):
