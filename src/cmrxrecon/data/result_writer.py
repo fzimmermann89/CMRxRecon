@@ -1,3 +1,4 @@
+import time
 import pytorch_lightning as pl
 from pytorch_lightning.callbacks import Callback
 import tempfile
@@ -35,14 +36,22 @@ class OnlineValidationWriter(Callback):
     def on_predict_start(self, trainer, pl_module) -> None:
         self.tmpdir = tempfile.mkdtemp()
 
+    def create_zip(self, modelname, mode="test"):
+        timestamp = time.strftime("%Y%m%d_%H%M%S")
+        filename = f"MultiCoil_{mode}_{modelname}_{timestamp}"
+        shutil.make_archive(filename, "zip", self.tmpdir)
+        shutil.rmtree(self.tmpdir)
+        return (Path(".") / (filename + ".zip")).absolute()
+
     def on_predict_end(self, trainer, pl_module) -> None:
-        print("results are under", self.tmpdir)
-        shutil.make_archive("MultiCoil", "zip", self.tmpdir)
+        modelname = pl_module.__class__.__name__
+        f = self.create_zip(modelname, mode="predict")
+        print("Predictions written to", f)
 
     def on_test_end(self, trainer, pl_module) -> None:
-        print("results are under", self.tmpdir)
-        shutil.make_archive("MultiCoil", "zip", self.tmpdir)
-        print("done")
+        modelname = pl_module.__class__.__name__
+        f = self.create_zip(modelname, mode="test")
+        print("Predictions written to", f)
 
     def write_results(self, outputs, batch, resize=True):
         for output, sample in zip(outputs, batch["sample"]):
