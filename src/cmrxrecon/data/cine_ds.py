@@ -194,7 +194,7 @@ class CineTestDataDS(Dataset):
         mask = (~np.isclose(k_data[:1, ..., :, :1], 0)).astype(np.float32)
         axis = float("sax" in filename.stem.split("_")[-1])
         acc_idx = str(filename).find("AccFactor")
-        acceleration = float(str(filename)[acc_idx + 9 : acc_idx + 1])
+        acceleration = float(str(filename)[acc_idx + 9 : acc_idx + 11])
 
         ret = {
             "k": k_data,
