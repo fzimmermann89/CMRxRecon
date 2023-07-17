@@ -65,17 +65,21 @@ class OnlineValidationWriter(Callback):
 
                 if not sz < 3:
                     to_keep_z = (round(sz / 2) - 2, round(sz / 2) - 1)  # slice indices to keep
-                    idx_z = []
-                    save_slices = []
-                    for i, z in enumerate(to_keep_z):
-                        # which of the current slices do we need to keep
-                        match = list((np.arange(100)[currentslices] == z).nonzero()[0])
-                        if match:
-                            idx_z = idx_z + match
-                            save_slices.append(i)
-                    if not idx_z:  # none
-                        continue
-                    currentslices = tuple(save_slices)
+                else:
+                    # print(sz)
+                    to_keep_z = range(sz)
+                idx_z = []
+                save_slices = []
+                for i, z in enumerate(to_keep_z):
+                    # which of the current slices do we need to keep
+                    match = list((np.arange(100)[currentslices] == z).nonzero()[0])
+                    if match:
+                        idx_z = idx_z + match
+                        save_slices.append(i)
+                if not idx_z:  # none
+                    continue
+                currentslices = tuple(save_slices)
+                data = data
                 # take instead of indexing to avoid collapsing dimensions
                 data = data.take(to_keep_t, 0).take(idx_z, 1).take(cropslice(sy, round(sy / 2)), 2).take(cropslice(sx, round(sx / 3)), 3)
                 shape = [len(to_keep_t), len(to_keep_z), round(sy / 2), round(sx / 3)]
