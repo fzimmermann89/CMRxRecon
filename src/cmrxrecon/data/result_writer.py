@@ -61,9 +61,10 @@ class OnlineValidationWriter(Callback):
             data = output.detach().cpu().transpose(0, 1).numpy()
             if resize:  # resize to 1/2 in y and 1/3 in x, keep 2 slices in z and 3 in t
                 sz, sy, sx = shape[1:]
+                to_keep_t = (0, 1, 2)  # slice indices to keep
+
                 if not sz < 3:
                     to_keep_z = (round(sz / 2) - 2, round(sz / 2) - 1)  # slice indices to keep
-                    to_keep_t = (0, 1, 2)  # slice indices to keep
                     idx_z = []
                     save_slices = []
                     for i, z in enumerate(to_keep_z):
