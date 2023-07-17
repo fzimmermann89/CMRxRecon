@@ -66,8 +66,7 @@ class OnlineValidationWriter(Callback):
                 if not sz < 3:
                     to_keep_z = (round(sz / 2) - 2, round(sz / 2) - 1)  # slice indices to keep
                 else:
-                    # print(sz)
-                    to_keep_z = range(sz)
+                    to_keep_z = list(range(sz))
                 idx_z = []
                 save_slices = []
                 for i, z in enumerate(to_keep_z):
