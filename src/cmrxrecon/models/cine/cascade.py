@@ -27,11 +27,11 @@ class MultiCoilDCLayer(torch.nn.Module):
             self.lambda_proj = torch.nn.Linear(embed_dim, Nc)
             with torch.no_grad():
                 self.lambda_proj.weight.zero_()
-                self.lambda_proj.bias[:] = 1e-1
+                self.lambda_proj.bias[:] = 10
             self.lambda_reg = None
         else:
             # static lambdas
-            self.lambda_reg = torch.nn.Parameter(torch.ones(1, Nc, 1, 1, 1, 1)) * 1e-2
+            self.lambda_reg = torch.nn.Parameter(torch.ones(1, Nc, 1, 1, 1, 1)) * 1
             self.lambda_proj = None
 
     def forward(self, k: torch.Tensor, xnn: torch.Tensor, mask: torch.Tensor, lambda_embed: torch.Tensor | None = None) -> torch.Tensor:
@@ -43,7 +43,7 @@ class MultiCoilDCLayer(torch.nn.Module):
         else:
             lam = self.lambda_reg
         mask = mask.unsqueeze(1)  # [Nb, Nc=1, Nz=1, Nz=1, Nu, Nf=1]
-        fk = torch.where(mask, 1.0 / (1.0 + lam), 0.0)  # facor for k data, 0 for missing data
+        fk = mask * (1.0 / (1.0 + lam))  # facor for k data, 0 for missing data
         fn = 1 - fk  # factor for xnn data
         knn = torch.fft.fft2(xnn, norm="ortho")
         xreg = fn * knn + fk * k
@@ -79,12 +79,11 @@ class Mapper(torch.nn.Module):
 
 
 class Cascade(CineModel):
-    def __init__(self, input_rss=False, lr=3e-3, weight_decay=1e-6, schedule=True, Nc: int = 10, T: int = 3, **kwargs):
+    def __init__(self, input_rss=False, lr=3e-3, weight_decay=1e-6, schedule=True, Nc: int = 10, T: int = 1, **kwargs):
         super().__init__()
         self.input_rss = input_rss
         embed_dim: int = 128
-        self.norm1 = 0.0001  # rss.max()
-        self.norm2 = self.norm1 * 10
+        self.norm = 0.0001  # rss.max()
         self.net = Unet(
             dim=2.5,
             channels_in=input_rss + 2 * Nc,
@@ -101,7 +100,6 @@ class Cascade(CineModel):
         )
         with torch.no_grad():
             self.net.last[0].bias.zero_()
-            self.net.last[0].weight *= 0.1
 
         self.dc = torch.nn.ModuleList([MultiCoilDCLayer(Nc, embed_dim=embed_dim) for _ in range(T)])
 
@@ -118,29 +116,24 @@ class Cascade(CineModel):
         )
         self.embed_net_iter = torch.nn.ModuleList([torch.nn.Sequential(torch.nn.Linear(embed_dim, embed_dim), torch.nn.ReLU(True)) for _ in range(T)])
 
-    def prepare_input(self, x, norm, include_rss=False):
+    def prepare_input(self, x, include_rss=False):
         # input the coil reconstructions as channels alongsite the rss
-        net_input = einops.rearrange(
-            torch.view_as_real(x),
-            "b c z t x y r -> (b z) (r c) t x y",
-        )
+        net_input = einops.rearrange(torch.view_as_real(x), "b c z t x y r -> (b z) (r c) t x y")
         if include_rss:
             rss = x.abs().square().sum(1, keepdim=True).sqrt()
-
             net_input = torch.cat((net_input, einops.rearrange(rss, "b c z t x y -> (b z) c t x y")), 1)
-        net_input = net_input * norm
         return net_input
 
-    def prepare_output(self, x_net, x_res, norm, batch_size):
+    def prepare_output(self, x_net, x_res, batch_size):
         # output the coil reconstructions as channels alongsite the rss
         x_net = einops.rearrange(x_net, "(b z) (r c) t x y -> b c z t x y r", b=batch_size, r=2).contiguous()
-        x_net = x_net * norm
         x_net = torch.view_as_complex(x_net)
         x = x_net + x_res
         return x
 
     def forward(self, k: torch.Tensor, mask: torch.Tensor, **other) -> dict:
         # get all the conditioning information or defaults
+        k = k * (1 / self.norm)
         augmentinfo = other.get("augmentinfo", torch.zeros(k.shape[0], self.embed_augment_channels, device=k.device)).float()
         acceleration = other.get("acceleration", torch.ones(k.shape[0], device=k.device)).float()[:, None]
         accelerationinfo = self.embed_acceleration_map(acceleration)
@@ -150,15 +143,32 @@ class Cascade(CineModel):
 
         z0 = self.embed_net(info)
         x0 = torch.fft.ifftn(k, dim=(-2, -1), norm="ortho")
-        rss = x0.abs().square().sum(1).sqrt()
+        rss = x0.abs().square().sum(1).sqrt() * self.norm
 
         x = [x0]
         for emb_net, dc in zip(self.embed_net_iter, self.dc):
             z = emb_net(z0)
-            net_input = self.prepare_input(x[-1], self.norm1, include_rss=self.input_rss)
+            net_input = self.prepare_input(x[-1], include_rss=self.input_rss)
             x_net = self.net(net_input)
-            x_net = self.prepare_output(x_net, x[-1], norm=self.norm2, batch_size=k.shape[0])
+            x_net = self.prepare_output(x_net, x[-1], batch_size=k.shape[0])
             x.append(dc(k, x_net, mask, z))
 
+        x = [el * self.norm for el in x]
         pred = x[-1].abs().square().sum(1).sqrt()
-        return dict(prediction=pred, rss=rss)
+        return dict(prediction=pred, rss=rss, xs=x)
+
+    def training_step(self, batch, batch_idx):
+        gt = batch.pop("gt")
+        ret = self(**batch)
+        prediction, rss = ret["prediction"], ret["rss"]
+        loss = torch.nn.functional.mse_loss(prediction, gt)
+        rss_loss = torch.nn.functional.mse_loss(rss, gt)
+        if "xs" in ret:
+            gready_loss = sum([torch.nn.functional.mse_loss(rss, gt) for x in ret["xs"]])
+        else:
+            gready_loss = 0.0
+        self.log("train_advantage", (rss_loss - loss) / rss_loss, on_step=True, on_epoch=True, prog_bar=True, logger=True)
+        self.log("train_loss", loss, on_step=True, on_epoch=True, prog_bar=False, logger=True)
+        self.log("rss_loss", rss_loss, on_step=True, on_epoch=True, prog_bar=False, logger=True)
+        loss = loss + gready_loss
+        return loss
