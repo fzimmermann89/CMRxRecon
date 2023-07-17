@@ -33,7 +33,8 @@ class CineAugment:
                     csm = torch.flip(csm, (-1,))
                 flippedx = 1
             elif r < 2 / 3:  # flip along y
-                k = torch.fft.fft(torch.fft.fft(k, dim=-1), dim=-1, norm="forward").conj()
+                k = torch.fft.fft(torch.fft.fft(k, dim=-1), dim=-1, norm="forward")
+                k = k.conj()
                 gt = torch.flip(gt, (-2,))
                 if csm is not None:
                     csm = torch.flip(csm, (-2,))
@@ -74,11 +75,11 @@ class CineAugment:
             shuffled = 1
 
         augmentinfo = torch.tensor([flippedx, flippedy, flippedz, flippedt, shuffled, phase])
-        sample["k"] = k
-        sample["gt"] = gt
+        sample["k"] = k.resolve_conj().contiguous()
+        sample["gt"] = gt.resolve_conj().contiguous()
         sample["augmentinfo"] = augmentinfo
         if csm is not None:
-            sample["csm"] = csm
+            sample["csm"] = csm.resolve_conj().contiguous()
         return sample
 
 
