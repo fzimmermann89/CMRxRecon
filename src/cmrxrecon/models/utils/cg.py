@@ -46,9 +46,11 @@ def conj_grad(H, b, x=None, niter=4, tol=None):
     for kiter in range(niter):
         d = H(p)
         alpha = norm_r_old / inner_product(p, d)
-        x += p * alpha
-        r -= d * alpha
+        x = x + p * alpha
+        r = r- d * alpha
         sqnorm_r_new = inner_product(r)
+        
+        #print('||res|| = {}'.format(sqnorm_r_new))
 
         if tol is not None and sqnorm_r_new.item() < tol:
             # the residual norm is below the tolerance

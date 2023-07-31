@@ -71,7 +71,7 @@ class CineAugment:
             shuffle = torch.randperm(k.shape[-5])
             k = k[..., shuffle, :, :, :, :]
             if csm is not None:
-                csm = csm[..., shuffle, :, :, :, :]
+                csm = csm[..., shuffle, :, :, :]
             shuffled = 1
 
         augmentinfo = torch.tensor([flippedx, flippedy, flippedz, flippedt, shuffled, phase])

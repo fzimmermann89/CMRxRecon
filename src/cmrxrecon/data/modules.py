@@ -22,7 +22,7 @@ class CineData(pl.LightningDataModule):
         singleslice: bool = True,
         center_lines: int = 24,
         random_acceleration: bool = True,
-        acceleration: tuple[int, ...] = (4,),
+        acceleration: tuple[int, ...] = (4,8,10),
         return_csm: bool = False,
         test_data_dir: Optional[str] = "files/MultiCoil/Cine/ValidationSet",
     ):
