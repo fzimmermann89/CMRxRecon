@@ -1,7 +1,7 @@
 import torch
 import einops
 from cmrxrecon.nets.unet import Unet
-from cmrxrecon.nets.unet import MLP
+from cmrxrecon.nets.mlp import MLP
 from typing import *
 from . import CineModel
 from cmrxrecon.models.utils.crop import crops_by_threshold, uncrop
@@ -63,7 +63,7 @@ class CascadeNN(torch.nn.Module):
             padding_mode="zeros",
             residual="inner",
             # residual=False,
-            norm=False,
+            # norm=False,
             norm="group8",
             feature_growth=lambda d: (1, 2, 1.5, 1.34, 1, 1)[d],
             activation="leakyrelu",
@@ -117,7 +117,7 @@ class CascadeNN(torch.nn.Module):
 
 
 class Cascade(CineModel):
-    def __init__(self, input_rss=True, lr=6e-4, weight_decay=1e-5, schedule=True, Nc: int = 10, T: int = 3, **kwargs):
+    def __init__(self, input_rss=True, lr=5e-4, weight_decay=1e-5, schedule=True, Nc: int = 10, T: int = 3, **kwargs):
         super().__init__()
         self.net = CascadeNN(input_rss=input_rss, Nc=Nc, T=T, **kwargs)
         self.EMANorm = EMA(alpha=0.9, max_iter=100)
