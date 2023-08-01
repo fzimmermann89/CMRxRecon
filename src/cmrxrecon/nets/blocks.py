@@ -37,7 +37,23 @@ class ResidualCBlock(nn.Module, EmbLayer):
         super().__init__()
         if activation is None:
             activation = partial(nn.ReLU, inplace=True)
-        self.block = CBlock(features, dim, kernel_size, dropout, norm, norm_before_activation, activation, bias, padding, padding_mode, groups, final_activation=None, split_dim=split_dim, emb_dim=emb_dim, final_norm=final_norm)
+        self.block = CBlock(
+            features,
+            dim,
+            kernel_size,
+            dropout,
+            norm,
+            norm_before_activation,
+            activation,
+            bias,
+            padding,
+            padding_mode,
+            groups,
+            final_activation=None,
+            split_dim=split_dim,
+            emb_dim=emb_dim,
+            final_norm=final_norm,
+        )
         self.resConv = ConvNd(dim)(features[0], features[-1], kernel_size=1, bias=True) if features[0] != features[-1] else None
 
         if self.block[-1].bias is not None:
@@ -59,9 +75,20 @@ class ResidualCBlock(nn.Module, EmbLayer):
 
 
 class SequentialEmb(nn.Sequential, EmbLayer):
+    def __init__(self, *args):
+        self.need_embeding = {}
+        super().__init__(*args)
+
+    def add_module(self, name: str, module: torch.nn.Module | None):
+        self.need_embeding[name] = isinstance(module, EmbLayer)
+        super().add_module(name, module)
+
     def forward(self, x, emb=None):
-        for module in self:
-            x = MaybeEmbed(module, x, emb)
+        for name, module in self._modules.items():
+            if self.need_embeding[name]:
+                x = module(x, emb)
+            else:
+                x = module(x)
         return x
 
 
@@ -88,7 +115,6 @@ class CBlock(SequentialEmb):
         """
         Convolutions from features[0]->features[1]->...->features[-1] with activation, optional norm and optional dropout
         """
-
         if padding is True:
             padding = "same"
         if isinstance(dropout, float) and dropout > 0:
@@ -112,7 +138,9 @@ class CBlock(SequentialEmb):
         if split_dim:
             conv_split = partial(ConvNd(dim), kernel_size=split_kernel_size, padding="same", padding_mode="replicate")
 
-        conv = partial(ConvNd(dim), kernel_size=conv_kernel_size, padding=padding, groups=groups, padding_mode=padding_mode, stride=stride)
+        conv = partial(
+            ConvNd(dim), kernel_size=conv_kernel_size, padding=padding, groups=groups, padding_mode=padding_mode, stride=stride
+        )
         modules = []
         for i, (fin, fout) in enumerate(zip(features[:-1], features[1:])):
             modules.append(conv(fin, fout, bias=i == len(features) - 2 if bias == "last" else bias))
@@ -149,7 +177,9 @@ class RestormerFeedForward(nn.Module):
         super().__init__()
         hidden_features = int(dim * ffn_expansion_factor)
         self.project_in = nn.Conv2d(dim, hidden_features * 2, kernel_size=1, bias=False)
-        self.dwconv = nn.Conv2d(hidden_features * 2, hidden_features * 2, kernel_size=3, stride=1, padding=1, groups=hidden_features * 2, bias=True)
+        self.dwconv = nn.Conv2d(
+            hidden_features * 2, hidden_features * 2, kernel_size=3, stride=1, padding=1, groups=hidden_features * 2, bias=True
+        )
         self.project_out = nn.Conv2d(hidden_features, dim, kernel_size=1, bias=False)
 
     def forward(self, x):
@@ -231,7 +261,6 @@ class ConvNormActivation(nn.Sequential):
         inplace: Optional[bool] = True,
         bias: Optional[bool] = None,
     ):
-
         if padding is None:
             if isinstance(kernel_size, int) and isinstance(dilation, int):
                 padding = (kernel_size - 1) // 2 * dilation
@@ -241,7 +270,11 @@ class ConvNormActivation(nn.Sequential):
                 padding = tuple((kernel_size[i] - 1) // 2 * dilation[i] for i in range(dim))
         if bias is None:
             bias = norm_layer is None
-        layers = [ConvNd(dim)(input_channels, output_channels, kernel_size, stride, padding, dilation=dilation, groups=groups, bias=bias)]
+        layers = [
+            ConvNd(dim)(
+                input_channels, output_channels, kernel_size, stride, padding, dilation=dilation, groups=groups, bias=bias
+            )
+        ]
 
         if norm_layer is not None:
             layers.append(norm_layer(output_channels))

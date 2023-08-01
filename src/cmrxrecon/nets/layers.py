@@ -61,7 +61,9 @@ class JoinMixin(ABC, nn.Module):
             xn = []
             for c in x:
                 if c.shape[2:] > minshape:
-                    newshape = (slice(None), slice(None)) + tuple((slice((s - m) // 2, (s - m) // 2 + m) for s, m in zip(c.shape[2:], minshape)))
+                    newshape = (slice(None), slice(None)) + tuple(
+                        (slice((s - m) // 2, (s - m) // 2 + m) for s, m in zip(c.shape[2:], minshape))
+                    )
                     xn.append(c[newshape])
                 else:
                     xn.append(c)
@@ -224,7 +226,14 @@ class Sequence(nn.Module):
 
 
 class Upsample(nn.Module):
-    def __init__(self, dim: int, factor: Union[float, Tuple[float, ...]] = 2, mode: str = "linear", conv_channels: Optional[Tuple[int, int]] = None, keep_leading_dim=False):
+    def __init__(
+        self,
+        dim: int,
+        factor: Union[float, Tuple[float, ...]] = 2,
+        mode: str = "linear",
+        conv_channels: Optional[Tuple[int, int]] = None,
+        keep_leading_dim=False,
+    ):
         super().__init__()
 
         rdim = dim - keep_leading_dim
@@ -247,7 +256,14 @@ class Upsample(nn.Module):
 
         if conv_channels is not None:
             in_channels, out_channels = conv_channels
-            conv = ConvNd(dim)(in_channels, out_channels, kernel_size=(1,) * keep_leading_dim + rdim * (3,), bias=False, padding="same", padding_mode="replicate")
+            conv = ConvNd(dim)(
+                in_channels,
+                out_channels,
+                kernel_size=(1,) * keep_leading_dim + rdim * (3,),
+                bias=False,
+                padding="same",
+                padding_mode="replicate",
+            )
             self.op = nn.Sequential(sample, conv)
         else:
             self.op = sample
@@ -278,7 +294,9 @@ class DownShuffle(nn.Module):
             shuffle = einops.layers.torch.Rearrange("b c (d f0) (h f1)  -> b (c f0 f1) d h", f0=factor[0], f1=factor[1])
             conv = nn.Conv2d(filter_in * factor[0] * factor[1], filter_out, 1, bias=False)
         elif dim == 3:
-            shuffle = einops.layers.torch.Rearrange("b c (d f0) (h f1) (w f2) -> b (c f0 f1 f2) d h w", f0=factor[0], f1=factor[1], f2=factor[2])
+            shuffle = einops.layers.torch.Rearrange(
+                "b c (d f0) (h f1) (w f2) -> b (c f0 f1 f2) d h w", f0=factor[0], f1=factor[1], f2=factor[2]
+            )
             conv = nn.Conv3d(filter_in * factor[0] * factor[1] * factor[2], filter_out, 1, bias=False)
         else:
             raise NotImplementedError(f"not implemented for dimension={dim}")
@@ -314,7 +332,9 @@ class UpShuffle(nn.Module):
             shuffle = einops.layers.torch.Rearrange("b (c f0 f1) d h -> b c (d f0) (h f1) ", f0=factor[0], f1=factor[1])
             conv = nn.Conv2d(filter_in, filter_out * factor[0] * factor[1], 1, bias=False)
         elif dim == 3:
-            shuffle = einops.layers.torch.Rearrange("b (c f0 f1 f2) d h w -> b c (d f0) (h f1) (w f2)", f0=factor[0], f1=factor[1], f2=factor[2])
+            shuffle = einops.layers.torch.Rearrange(
+                "b (c f0 f1 f2) d h w -> b c (d f0) (h f1) (w f2)", f0=factor[0], f1=factor[1], f2=factor[2]
+            )
             conv = nn.Conv3d(filter_in, filter_out * factor[0] * factor[1] * factor[2], 1, bias=False)
         else:
             raise NotImplementedError(f"not implemented for dimension={dim}")
