@@ -561,3 +561,65 @@ def act(name: str = "ReLu"):
         return nn.GELU
     else:
         raise NotImplementedError(name)
+
+
+class CoordConvNd(nn.Module):
+    def __init__(
+        self,
+        dim,
+        in_channels,
+        out_channels,
+        kernel_size=3,
+        stride=1,
+        padding=0,
+        dilation=1,
+        groups=1,
+        bias=True,
+        padding_mode="zeros",
+        device=None,
+        dtype=None,
+        coord_for_dim: None | tuple[int, ...] = None,
+        coord_with_r: bool = False,
+    ):
+        """CoordConv as in https://arxiv.org/abs/1807.03247
+
+        coord_for_dim: tuple of dimensions to add coordinates to. If None, add to all spatial dimensions
+        coord_with_r: whether to add radius coordinate as well. radius as done along all dimensions in coord_for_dim
+        """
+        if coord_for_dim is None:
+            coord_for_dim = tuple(range(-dim, 0))
+
+        self.coord_for_dim = [range(dim + 2)[d] for d in coord_for_dim]
+        self.coord_with_r = coord_with_r
+        coord_channels = len(coord_for_dim) + coord_with_r
+        self.conv = ConvNd(dim)(
+            in_channels + coord_channels,
+            out_channels,
+            kernel_size,
+            stride,
+            padding,
+            dilation,
+            groups,
+            bias,
+            padding_mode,
+            device,
+            dtype,
+        )
+
+    def coordinates(self, shape):
+        coords = []
+        for dim in self.coord_for_dim:
+            curr = torch.linspace(-1, 1, shape[dim], device="cpu")
+            curr = curr[(None,) * dim + (Ellipsis,) + (None,) * (len(shape) - dim - 1)]
+            coords.append(curr)
+        if self.with_r:
+            r = torch.sqrt(sum([c**2 for c in coords]))
+            coords.append(r)
+        coords = torch.cat([c.expaned(shape) for c in coords], dim=1)
+        return coords
+
+    def forward(self, x):
+        coords = self.coordinates(x.shape)
+        x = torch.cat((x, coords), dim=1)
+        x = self.conv(x)
+        return x
