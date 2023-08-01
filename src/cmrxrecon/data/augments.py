@@ -5,7 +5,14 @@ from torch import nn
 
 
 class CineAugment:
-    def __init__(self, p_flip_spatial: float = 0.4, p_flip_temporal: float = 0.2, p_shuffle_coils: float = 0.2, p_phase: float = 0.2, flip_view: bool = False):
+    def __init__(
+        self,
+        p_flip_spatial: float = 0.4,
+        p_flip_temporal: float = 0.2,
+        p_shuffle_coils: float = 0.2,
+        p_phase: float = 0.2,
+        flip_view: bool = False,
+    ):
         """
         Augmentations for cine data
              (Coils , Slice/view, Time, Phase Enc. (undersampled), Frequency Enc. (fully sampled))
@@ -84,7 +91,13 @@ class CineAugment:
 
 
 class AugmentDataset(torch.utils.data.Dataset):
-    def __init__(self, dataset, augments: None | nn.Module | tuple[nn.Module, ...] = None, getter=lambda x: x, setter=lambda x, y: y):
+    def __init__(
+        self,
+        dataset,
+        augments: None | nn.Module | tuple[nn.Module, ...] = None,
+        getter=lambda x: x,
+        setter=lambda x, y: y,
+    ):
         self.dataset = dataset
         if not isinstance(augments, nn.Module):
             augments = nn.Sequential(*augments)
@@ -186,7 +199,7 @@ class RandomKSpaceFlipAlongDimensionsIndirect(nn.Module):
         self.otherdim = dim
 
     def forward(self, k):
-        if torch.rand(1) < p:
+        if torch.rand(1) < self.p:
             k = torch.fft.fft(torch.fft.fft(k, dim=self.otherdim), dim=self.otherdim, norm="forward").conj()
         return k
 
