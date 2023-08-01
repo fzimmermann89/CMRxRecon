@@ -12,5 +12,5 @@ def reciprocal_rss(x: torch.Tensor, dim: int = 1) -> torch.Tensor:
 
 
 @torch.jit.script
-def masked_mean(x: torch.Tensor, mask: torch.Tensor, dim: tuple[int, ...] = (-1,), keepdim: bool = False) -> torch.Tensor:
+def masked_mean(x: torch.Tensor, mask: torch.Tensor, dim: list[int] = (-1,), keepdim: bool = False) -> torch.Tensor:
     return (x * mask).sum(dim=dim, keepdim=keepdim) / mask.sum(dim=dim, keepdim=keepdim)
