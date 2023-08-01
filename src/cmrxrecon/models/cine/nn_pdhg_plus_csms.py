@@ -7,7 +7,8 @@ import numpy as np
 from cmrxrecon.models.utils.grad_ops import GradOperators
 from cmrxrecon.models.utils.prox_ops import ClipAct
 from cmrxrecon.nets.unet import Unet
-from cmrxrecon.models.utils.csm import CSM_refine, CSM_Sriram
+from cmrxrecon.models.utils.csm import CSM_refine
+from cmrxrecon.models.utils.csm import CSM_Sriram_support as CSM_Sriram
 from cmrxrecon.models.utils.cg import conj_grad
 from cmrxrecon.models.utils.encoding import Dyn2DCartEncObj
 from . import CineModel

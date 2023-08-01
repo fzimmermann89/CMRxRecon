@@ -2,6 +2,7 @@ import einops
 import numpy as np
 import torch
 from torch import nn
+from . import masked_mean, reciprocal_rss, rss
 
 
 class CSM_Sriram(nn.Module):
@@ -13,42 +14,137 @@ class CSM_Sriram(nn.Module):
 
     """
 
-    def __init__(self, net_csm: nn.Module):
+    def __init__(
+        self,
+        net_csm: nn.Module | None,
+        normalize: bool = True,
+        threshold: float = 0,
+        fill_x0=False,
+        mask=False,
+        limit_acs_fullysampled=True,
+        norm_x0=False,
+        batch_coils=False,
+    ):
+        """
+
+        Parameters
+        ----------
+        net_csm
+            net used to get from x0 to csm
+        normalize
+            normlize CSM such that Sum_coils S.H.*S = 1
+        threshold
+            rel. threshold for filling or masking
+        fill_x0
+            fill x0s under the relative (to max) threshold by (1/Nc)**(1/2)*exp(1j mean phase)
+        mask
+            mask x0s and final csms under the relative (to max) threshold
+        limit_acs_fullysampled
+            also mask acs in fullysampled diretion
+        norm_x0
+            normalize x0s such that Sum_coils S.H.*S = 1
+        batch_coils
+            batch the coils dimension before feeding to net_csm
+
+
+
+        """
         super().__init__()
-        self.refine_csm = CSM_refine2(net_csm)
+        self.refine_csm = CSM_refine(net_csm, batch_coils=batch_coils, normalize=False) if net_csm is not None else None
+        self.threshold = threshold
+        self.normalize = normalize
+        self.fill_x0 = fill_x0
+        self.mask = mask
+        self.limit_acs_fullysampled = limit_acs_fullysampled
+        self.norm_x0 = norm_x0
+
+        if mask and fill_x0:
+            raise ValueError("mask and fill_x0 cannot be True at the same time")
+        if (mask or fill_x0) and threshold <= 0:
+            raise ValueError("threshold must be > 0 if mask or fill_x0 is True")
 
     def forward(self, y: torch.Tensor, n_center_lines: int = 24):
         # temporal mean
-        ym = y.mean(3, keepdim=False)
+        ym = y.mean(3, keepdim=False)  # (batch, coils, z, undersampled, fullysampled)
 
         # mask out everything but acs
-        mask_center = torch.ones_like(ym)
+        mask_center = torch.ones(*((1,) * (ym.ndim - 2)), *ym.shape[-2:], device=ym.device, dtype=ym.dtype)
         mask_center[..., n_center_lines // 2 : -n_center_lines // 2, :] = 0
-        mask_center[..., n_center_lines : - n_center_lines] = 0
-        
+        if self.limit_acs_fullysampled:  # also mask acs in fullysampled diretion
+            mask_center[..., n_center_lines:-n_center_lines] = 0
+
         ym = mask_center * ym
 
         # zero-filled recon
-        x0 = torch.fft.ifftn(ym, dim=(-2, -1), norm="ortho")
-        x0_img = x0.sum(1)
-        norm_factor = torch.pow(torch.sum(x0.conj() * x0, dim=1, keepdim=True), -0.5)
-        x0 = x0 * norm_factor
-        
-        supp = torch.heaviside(torch.nn.functional.threshold(x0_img.abs(), 0.005 * x0_img.abs().max(), 0), torch.tensor([0.]).to(y.device)).unsqueeze(1)
+        x0: torch.Tensor = torch.fft.ifftn(ym, dim=(-2, -1), norm="ortho")
 
-        csm = self.refine_csm(x0 * supp) #+ supp * x0
-        #csm =  x0 * supp #* x0
-        
-        norm_factor = torch.sum(csm.conj() * csm, dim=1, keepdim=True).real
-        norm_factor = torch.pow(norm_factor, -0.5)
-        norm_factor = torch.nan_to_num(norm_factor, nan=.0, posinf = 0)
-        
-        csm =norm_factor * csm * supp
-        
+        if self.fill_x0 and self.threshold > 0:  # fill low intensity x0s with average phase
+            x_rss = rss(x0).unsqueeze(1)
+            mask = x_rss > self.threshold * x_rss.max()
+            fill_mag = (1 / x0.shape[1]) ** 0.5
+            fill_phase = masked_mean(torch.angle(x0), mask, dim=(-1, -2, -3), keepdim=True)
+            fill_value = fill_mag * torch.exp(1j * fill_phase)
+            x0 = torch.where(mask, x0, fill_value)
+
+        if self.norm_x0:
+            if self.fill_x0:
+                normfactor = torch.nan_to_num(x_rss.inverse(), nan=0.0, posinf=0)
+            else:
+                normfactor = reciprocal_rss(x0).unsqueeze(1)
+            x0 = x0 * normfactor
+
+        if self.mask and self.threshold > 0:
+            x_sum_abs = x0.sum(1).abs()
+            mask = (x_sum_abs > self.threshold * x_sum_abs.max()).unsqueeze(1)
+            x0 = x0 * mask
+
+        if self.refine_csm is None:
+            csm: torch.Tensor = x0
+        else:
+            csm: torch.Tensor = self.refine_csm(x0)
+
+        if self.normalize:
+            norm_factor = torch.nan_to_num(reciprocal_rss(csm).unsqueeze(1), nan=0.0, posinf=0)
+            csm = norm_factor * csm
+
+        if self.mask and self.threshold > 0 and self.refine_csm is not None:
+            csm = csm * mask
+
         return csm
-    
-    
-class CSM_Yiasemis(nn.Module):
+
+
+class CSM_Sriram_support(CSM_Sriram):
+
+    """
+    CNN to estimate CSM from y based on Sriram
+    https://arxiv.org/pdf/2004.06688.pdf; figure 1; eq (12)
+    (i.e. from the zero-filled recon of the center lines)
+    with added normalization before the refinement and support mask
+
+    """
+
+    def __init__(
+        self,
+        net_csm: nn.Module,
+        mask_fullysampled: bool = True,
+        threshold: float = 0.005,
+        fill_x0: bool = False,
+        mask: bool = True,
+        norm_x0=True,
+        normalize: bool = True,
+    ):
+        super().__init__(
+            net_csm=net_csm,
+            threshold=threshold,
+            fill_x0=fill_x0,
+            mask=mask,
+            norm_x0=norm_x0,
+            mask_fullysampled=mask_fullysampled,
+            normalize=normalize,
+        )
+
+
+class CSM_Yiasemis(CSM_Sriram):
 
     """
     from Figure 2
@@ -56,113 +152,68 @@ class CSM_Yiasemis(nn.Module):
 
     """
 
-    def __init__(self, net_csm: nn.Module):
-        super().__init__()
-        #self.refine_csm = CSM_refine2(net_csm)
-
-    def forward(self, y: torch.Tensor, n_center_lines: int = 24):
-        # temporal mean
-        ym = y.mean(3, keepdim=False)
-
-        # mask out everything but acs
-        mask_center = torch.ones_like(ym)
-        mask_center[..., n_center_lines // 2 : -n_center_lines // 2, :] = 0
-        mask_center[..., n_center_lines : - n_center_lines] = 0
-        
-        ym = mask_center * ym
-
-        # zero-filled recon
-        x0 = torch.fft.ifftn(ym, dim=(-2, -1), norm="ortho")
-        xRSS = x0.abs().square().sum(1).pow(0.5)
-        
-        csm = x0 / xRSS
-        
-        return csm
+    def __init__(
+        self,
+        threshold: float = 0,
+        fill_x0: bool = False,
+        mask: bool = False,
+    ):
+        super().__init__(
+            net_csm=None, threshold=0.0, fill_x0=fill_x0, mask=mask, norm_x0=False, normalize=True, mask_fullysampled=True
+        )
 
 
 class CSM_refine(nn.Module):
 
     """
-    CNN to "refine" CSM from the CSMs initially estimated with ESPIRIT
+    CNN to "refine" CSM from the CSMs initially estimated with ESPIRIT or x0s
 
     """
 
-    def __init__(self, net_csm: nn.Module):
+    def __init__(self, net_csm: nn.Module, batch_coils: bool = False, normalize: bool = False):
+        """
+        Parameters
+        net_csm:
+            the CNN to refine the CSMs
+        batch_coils:
+            if True, the input tensor batches are assumed to be (batch, coils, z, y, x, real/imag) "version 2"
+        normalize:
+            if True, the output CSMs are normalized to RSS=1
+        """
         super().__init__()
         self.net_csm = net_csm
+        self.batch_coils = batch_coils
+        self.normalize = normalize
 
     def forward(self, csm: torch.Tensor):
-        Nb = csm.shape[0]
+        Nb, Nc = csm.shape[:2]
 
-        # to real 2D input tensors
+        # to real 2D input tensor batches
         csm = torch.view_as_real(csm)
-        csm = einops.rearrange(csm, "b c z y x r -> (b z) (c r) y x")
+        if self.batch_coils:
+            csm = einops.rearrange(csm, "b c z y x r -> (b z c) r y x")
+        else:
+            csm = einops.rearrange(csm, "b c z y x r -> (b z) (c r) y x")
 
         # apply cnn
         csm = csm + self.net_csm(csm)
 
-        # rearrange to complex
-        csm = torch.view_as_complex(einops.rearrange(csm, "(b z) (c r) y x -> b c z y x r", b=Nb, r=2).contiguous())
+        # rearrange to back complex 3D tensor batches
+        if self.batch_coils:
+            csm = torch.view_as_complex(einops.rearrange(csm, "(b z c) r y x -> b c z y x r", b=Nb, c=Nc, r=2).contiguous())
+        else:
+            csm = torch.view_as_complex(einops.rearrange(csm, "(b z) (c r) y x -> b c z y x r", b=Nb, r=2).contiguous())
 
-        # normalize output
-        norm_factor = torch.pow(torch.sum(csm.conj() * csm, dim=1, keepdim=True), -0.5)
-
-        return norm_factor * csm
-    
-    
-class CSM_refine2(nn.Module):
-
-    """
-    CNN to "refine" CSM from the CSMs initially estimated with ESPIRIT
-
-    """
-
-    def __init__(self, net_csm: nn.Module):
-        super().__init__()
-        self.net_csm = net_csm
-
-    def forward(self, csm: torch.Tensor):
-        Nb, Nc, Nz = csm.shape[0], csm.shape[1], csm.shape[2]
-
-        version = 'version2'
-        if version == 'version1':
-            # to real 2D input tensors
-            csm = torch.concatenate([csm.real, csm.imag],dim=1)
-            
-            pattern = "b c2 z u f-> (b z) c2 u f"
-            
-            
-            csm = einops.rearrange(csm, pattern)
-    
-            # apply cnn
-            csm = csm + self.net_csm(csm)
-            
-            pattern = "(b z) c2 u f-> b c2 z u f"
-            csm = einops.rearrange(csm, pattern, b=Nb, c2=2*Nc, z=Nz)
-            
-            csm = torch.stack([csm[:,:Nc,...], csm[:,Nc:,...]],dim=-1)
-            
-            csm = torch.view_as_complex(csm.contiguous())
-            
-        elif version == 'version2':
-            
-            csm = torch.view_as_real(csm)
-            
-            pattern = "b c z u f c2-> (b z c) c2 u f"
-            
-            csm = einops.rearrange(csm, pattern)
-            
-            csm = csm + self.net_csm(csm)
-            
-            pattern = " (b z c) c2 u f -> b c z u f c2"
-            csm = einops.rearrange(csm, pattern, b=Nb, c=Nc, z=Nz)
-            
-            csm = torch.view_as_complex(csm.contiguous())
-
-        # normalize output
-        #norm_factor = torch.pow(torch.sum(csm.conj() * csm, dim=1, keepdim=True), -0.5)
+        if self.normalize:
+            norm_factor = torch.nan_to_num(reciprocal_rss(csm).unsqueeze(1), nan=0.0, posinf=0)
+            csm = norm_factor * csm
 
         return csm
+
+
+class CSM_refine2(CSM_refine):
+    def __init__(self, net_csm: nn.Module, batch_coils: bool = True, normalize: bool = False):
+        super().__init__(net_csm, batch_coils, normalize)
 
 
 def sigpy_espirit(k_centered: torch.Tensor, threshold: float = 0.01, max_iter: int = 150, crop: float = 0.7, fill: bool = True):
