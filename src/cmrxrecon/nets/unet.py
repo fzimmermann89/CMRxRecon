@@ -55,7 +55,7 @@ class Unet(nn.Module):
         up_mode="linear",
         down_mode="maxpool",
         activation: Union[str, Callable[..., nn.Module]] = "relu",
-        feature_growth: Callable[[int], float] = lambda depth: 2.0,
+        feature_growth: Callable[[int], float] | tuple[float, ...] | float = 2.0,
         groups_enc: int = 1,
         groups_dec: int = 1,
         groups_last: int = 1,
@@ -107,6 +107,13 @@ class Unet(nn.Module):
             if not isinstance(bias, bool):
                 raise ValueError("bias must be bool or 'last'")
             bias_last = bias
+
+        if isinstance(feature_growth, (tuple, list)):
+            _feature_growth = feature_growth
+            feature_growth = lambda d: _feature_growth[d]
+        elif isinstance(feature_growth, float):
+            _feature_growth = feature_growth
+            feature_growth = lambda d: _feature_growth
 
         fdim = dim
         dim = int(math.ceil(dim))

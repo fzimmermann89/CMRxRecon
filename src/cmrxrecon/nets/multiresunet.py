@@ -18,13 +18,15 @@ class MultiResBlock(nn.Module):
         bias: bool = True,
         padding: Union[bool, int] = True,
         padding_mode: str = "zeros",
-        groups:int = 1,
+        groups: int = 1,
     ):
         """
         MultiResBlock
         """
         super().__init__()
-        conv3 = partial(ConvNd(dim), kernel_size=3, padding=1 if padding else 0, groups=groups, bias=bias, padding_mode=padding_mode)
+        conv3 = partial(
+            ConvNd(dim), kernel_size=3, padding=1 if padding else 0, groups=groups, bias=bias, padding_mode=padding_mode
+        )
         conv1 = partial(ConvNd(dim), kernel_size=1, padding=0, groups=groups, bias=bias, padding_mode=padding_mode)
 
         modules3 = nn.ModuleList()
@@ -103,9 +105,34 @@ class MultiResSkipBlock(nn.Module):
 
 
 class MultiResSkipPath(nn.Module):
-    def __init__(self, dim: int, channels_in: int, channels: int, stages: int, padding_mode: str = "zeros", activation: Callable = partial(nn.ReLU, inplace=True), normtype="batch", norm_before_activation: bool = True, dropout: float = 0.0):
+    def __init__(
+        self,
+        dim: int,
+        channels_in: int,
+        channels: int,
+        stages: int,
+        padding_mode: str = "zeros",
+        activation: Callable = partial(nn.ReLU, inplace=True),
+        normtype="batch",
+        norm_before_activation: bool = True,
+        dropout: float = 0.0,
+    ):
         super().__init__()
-        self.blocks = nn.Sequential(*[MultiResSkipBlock(dim, channels_in if i == 0 else channels, channels, padding_mode, activation, normtype, norm_before_activation, dropout) for i in range(stages)])
+        self.blocks = nn.Sequential(
+            *[
+                MultiResSkipBlock(
+                    dim,
+                    channels_in if i == 0 else channels,
+                    channels,
+                    padding_mode,
+                    activation,
+                    normtype,
+                    norm_before_activation,
+                    dropout,
+                )
+                for i in range(stages)
+            ]
+        )
 
     def forward(self, x):
         return self.blocks(x)
@@ -151,7 +178,9 @@ class MultiResUnet(nn.Module):
         if up_mode == "upconv":
             upsampling = partial(ConvTransposeNd(dim), kernel_size=2, stride=2, bias=True)
         elif up_mode == "upsample":
-            upsampling = lambda in_channels, out_channels: Upsample(dim=dim, factor=2., up_mode='nearest', conv_channels=(in_channels, out_channels))
+            upsampling = lambda in_channels, out_channels: Upsample(
+                dim=dim, factor=2.0, up_mode="nearest", conv_channels=(in_channels, out_channels)
+            )
         else:
             raise NotImplementedError(f"unknown up_mode {up_mode}")
         encoder = partial(MultiResBlock, dim=dim, norm=norm, bias=True, dropout=dropout, padding=True, padding_mode=padding_mode)
@@ -165,7 +194,9 @@ class MultiResUnet(nn.Module):
             features_enc.append([filters * 3 * scale] + [filters * scale, filters * 2 * scale, filters * 3 * scale])
             features_skip.append([sum(features_enc[-1][1:]), 4 * filters * scale])
             features_up.append([None, 4 * filters * scale])
-            features_dec.append([features_skip[-1][-1] + features_up[-1][-1], filters * scale, filters * 2 * scale, filters * 3 * scale])
+            features_dec.append(
+                [features_skip[-1][-1] + features_up[-1][-1], filters * scale, filters * 2 * scale, filters * 3 * scale]
+            )
         inner = [2 * f for f in features_enc[-1]]
         for fup, fdec in zip(features_up, features_dec[1:] + [inner]):
             fup[0] = sum(fdec[1:])

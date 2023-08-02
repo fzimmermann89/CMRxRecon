@@ -56,6 +56,14 @@ class BasicUNet(MappingModel):
     def configure_optimizers(self):
         optimizer = torch.optim.AdamW(self.parameters(), lr=3e-4, weight_decay=1e-5)
         scheduler = torch.optim.lr_scheduler.OneCycleLR(
-            optimizer, max_lr=3e-3, total_steps=self.trainer.estimated_stepping_batches, pct_start=0.05, anneal_strategy="cos", cycle_momentum=True, div_factor=30, final_div_factor=1e3, verbose=False
+            optimizer,
+            max_lr=3e-3,
+            total_steps=self.trainer.estimated_stepping_batches,
+            pct_start=0.05,
+            anneal_strategy="cos",
+            cycle_momentum=True,
+            div_factor=30,
+            final_div_factor=1e3,
+            verbose=False,
         )
         return [optimizer], [{"scheduler": scheduler, "interval": "step"}]

@@ -14,7 +14,7 @@ class TransposedAttention(nn.Module):
         Transposed Self Attention from Restormer
         https://github.com/swz30/Restormer
         https://arxiv.org/pdf/2111.09881.pdf
-        
+
         dim: input dimension
         num_heads: number of attention heads
         """
@@ -22,7 +22,15 @@ class TransposedAttention(nn.Module):
         self.num_heads = num_heads
         self.temperature = nn.Parameter(torch.ones(num_heads, 1, 1))
         self.qkv = nn.Conv2d(dim, dim * 3, kernel_size=1, bias=True)
-        self.qkv_dwconv = nn.Conv2d(dim * 3, dim * 3, kernel_size=3, stride=1, padding=1, groups=dim * 3, bias=False,)
+        self.qkv_dwconv = nn.Conv2d(
+            dim * 3,
+            dim * 3,
+            kernel_size=3,
+            stride=1,
+            padding=1,
+            groups=dim * 3,
+            bias=False,
+        )
         self.project_out = nn.Conv2d(dim, dim, kernel_size=1, bias=True)
 
     def forward(self, x):
@@ -45,7 +53,10 @@ class SelfAttention(nn.Module):
     """
 
     def __init__(
-        self, dim: int, dim_head: int = 64, heads: int = 8,
+        self,
+        dim: int,
+        dim_head: int = 64,
+        heads: int = 8,
     ):
         """
         dim: Input dimensionality.
@@ -53,7 +64,7 @@ class SelfAttention(nn.Module):
         heads: Number of attention heads.
         """
         super().__init__()
-        self.scale = dim_head ** -0.5
+        self.scale = dim_head**-0.5
         self.heads = heads
         inner_dim = dim_head * heads
         self.norm = nn.LayerNorm(dim)
@@ -82,14 +93,25 @@ class SelfAttention(nn.Module):
 
 class SqueezeExcitation(nn.Module):
     """
-        Squeeze-and-Excitation block from https://arxiv.org/abs/1709.01507 
+    Squeeze-and-Excitation block from https://arxiv.org/abs/1709.01507
     """
 
     def __init__(
-        self, dim, input_channels: int, squeeze_channels: int, activation: Callable[..., nn.Module] = nn.ReLU, scale_activation: Callable[..., torch.nn.Module] = nn.Sigmoid,
+        self,
+        dim,
+        input_channels: int,
+        squeeze_channels: int,
+        activation: Callable[..., nn.Module] = nn.ReLU,
+        scale_activation: Callable[..., torch.nn.Module] = nn.Sigmoid,
     ):
         super().__init__()
-        self.scale = nn.Sequential(AdaptiveAvgPoolnD(dim)(1), ConvNd(dim)(input_channels, squeeze_channels, 1), activation(), ConvNd(dim)(squeeze_channels, input_channels, 1), scale_activation(),)
+        self.scale = nn.Sequential(
+            AdaptiveAvgPoolnD(dim)(1),
+            ConvNd(dim)(input_channels, squeeze_channels, 1),
+            activation(),
+            ConvNd(dim)(squeeze_channels, input_channels, 1),
+            scale_activation(),
+        )
 
     def forward(self, x: Tensor) -> Tensor:
         return x * self.scale(x)

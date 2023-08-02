@@ -104,14 +104,16 @@ class CRNN(nn.Module):
         self.conv_out = nn.Conv2d(filters, 2, kernel_size, padding=kernel_size // 2)
         self.filters = filters
 
-    def forward(self, x, DC: Tuple[Callable[...,Tensor]] = (lambda x: x,)):
+    def forward(self, x, DC: Tuple[Callable[..., Tensor]] = (lambda x: x,)):
         """
         DC: Tuple of Data Consistency Layers, lenth determines number of iterations
         """
         n_batch, n_seq, n_x, n_y = x.size()
         hidden_old = [torch.zeros(n_batch * n_seq, self.filters, n_x, n_y, device=x.device)] * (len(self.crnn))
         h0 = torch.zeros(n_seq, n_batch, self.filters, n_x, n_y, device=x.device)
-        out = [x,]
+        out = [
+            x,
+        ]
         for dc in DC:
             real_x = torch.view_as_real(x).permute(1, 0, 4, 2, 3)
             hidden = []

@@ -14,6 +14,7 @@ and
 https://github.com/pytorch/vision/blob/main/torchvision/models/efficientnet.py
 """
 
+
 class MBConv(nn.Module):
     def __init__(
         self,
@@ -38,17 +39,65 @@ class MBConv(nn.Module):
 
         if fused:
             if expanded_channels != input_channels:
-                layers.append(ConvNormActivation(dim, input_channels, expanded_channels, kernel_size=kernel, stride=stride, norm_layer=norm_layer, activation_layer=activation_layer))
-                layers.append(ConvNormActivation(dim, expanded_channels, output_channels, kernel_size=1, norm_layer=norm_layer, activation_layer=None))
+                layers.append(
+                    ConvNormActivation(
+                        dim,
+                        input_channels,
+                        expanded_channels,
+                        kernel_size=kernel,
+                        stride=stride,
+                        norm_layer=norm_layer,
+                        activation_layer=activation_layer,
+                    )
+                )
+                layers.append(
+                    ConvNormActivation(
+                        dim, expanded_channels, output_channels, kernel_size=1, norm_layer=norm_layer, activation_layer=None
+                    )
+                )
             else:
-                layers.append(ConvNormActivation(dim, input_channels, output_channels, kernel_size=kernel, stride=stride, norm_layer=norm_layer, activation_layer=activation_layer))
+                layers.append(
+                    ConvNormActivation(
+                        dim,
+                        input_channels,
+                        output_channels,
+                        kernel_size=kernel,
+                        stride=stride,
+                        norm_layer=norm_layer,
+                        activation_layer=activation_layer,
+                    )
+                )
         else:
             if expanded_channels != input_channels:
-                layers.append(ConvNormActivation(dim, input_channels, expanded_channels, kernel_size=1, norm_layer=norm_layer, activation_layer=activation_layer))
-            layers.append(ConvNormActivation(dim, expanded_channels, expanded_channels, kernel_size=kernel, stride=stride, groups=expanded_channels, norm_layer=norm_layer, activation_layer=activation_layer))
+                layers.append(
+                    ConvNormActivation(
+                        dim,
+                        input_channels,
+                        expanded_channels,
+                        kernel_size=1,
+                        norm_layer=norm_layer,
+                        activation_layer=activation_layer,
+                    )
+                )
+            layers.append(
+                ConvNormActivation(
+                    dim,
+                    expanded_channels,
+                    expanded_channels,
+                    kernel_size=kernel,
+                    stride=stride,
+                    groups=expanded_channels,
+                    norm_layer=norm_layer,
+                    activation_layer=activation_layer,
+                )
+            )
             squeeze_channels = max(1, input_channels // 4)
             layers.append(SqueezeExcitation(dim, expanded_channels, squeeze_channels, activation=partial(nn.SiLU, inplace=True)))
-            layers.append(ConvNormActivation(dim, expanded_channels, output_channels, kernel_size=1, norm_layer=norm_layer, activation_layer=None))
+            layers.append(
+                ConvNormActivation(
+                    dim, expanded_channels, output_channels, kernel_size=1, norm_layer=norm_layer, activation_layer=None
+                )
+            )
         self.block = nn.Sequential(*layers)
         self.output_channels = output_channels
 
@@ -59,7 +108,7 @@ class MBConv(nn.Module):
         else:
             return result
 
-        
+
 @dataclass
 class MBConfig:
     fused: bool
@@ -105,7 +154,17 @@ class EfficientNet(nn.Module):
 
         if norm_layer is None:
             norm_layer = lambda channels: nn.GroupNorm(num_groups=8, num_channels=channels, eps=1e-3)
-        layers: list[nn.Module] = [ConvNormActivation(dim, input_channels, settings[0].input_channels, kernel_size=3, stride=2, norm_layer=norm_layer, activation_layer=nn.SiLU)]
+        layers: list[nn.Module] = [
+            ConvNormActivation(
+                dim,
+                input_channels,
+                settings[0].input_channels,
+                kernel_size=3,
+                stride=2,
+                norm_layer=norm_layer,
+                activation_layer=nn.SiLU,
+            )
+        ]
         total_blocks = sum(config.num_layers for config in settings)
         block_counter = 0.0
         for config in settings:
@@ -129,7 +188,11 @@ class EfficientNet(nn.Module):
             layers.append(nn.Sequential(*stage))
         if last_channel is None:
             last_channel = 4 * settings[-1].output_channels
-        layers.append(ConvNormActivation(dim, settings[-1].output_channels, last_channel, kernel_size=1, norm_layer=norm_layer, activation_layer=nn.SiLU))
+        layers.append(
+            ConvNormActivation(
+                dim, settings[-1].output_channels, last_channel, kernel_size=1, norm_layer=norm_layer, activation_layer=nn.SiLU
+            )
+        )
 
         self.features = nn.Sequential(*layers)
         self.avgpool = AdaptiveAvgPoolnD(dim)(1)
@@ -147,7 +210,7 @@ class EfficientNet(nn.Module):
                 nn.init.ones_(m.weight)
                 nn.init.zeros_(m.bias)
             elif isinstance(m, nn.Linear):
-                init_range = 1.0 / (m.out_features) ** .5
+                init_range = 1.0 / (m.out_features) ** 0.5
                 nn.init.uniform_(m.weight, -init_range, init_range)
                 nn.init.zeros_(m.bias)
 
