@@ -18,7 +18,7 @@ from einops import rearrange
 
 class Laplace2DCSM(nn.Module):
     def __init__(self):
-        super(Laplace2DCSM, self).__init__()
+        super().__init__()
         self.laplace_kernel = torch.tensor([[1.0, 1.0, 1.0], [1.0, -8.0, 1.0], [1.0, 1.0, 1.0]]).unsqueeze(0)
 
     def apply_L(self, csm):
@@ -37,8 +37,10 @@ class Laplace2DCSM(nn.Module):
 
 
 class LambdaCNN(nn.Module):
-    def __init__(self, cnn_block=Unet(3, channels_in=2, channels_out=2, layer=1, conv_per_dec_block=4, filters=32)):
-        super(LambdaCNN, self).__init__()
+    def __init__(self, cnn_block=None):
+        if cnn_block is None:
+            cnn_block = Unet(3, channels_in=2, channels_out=2, layer=1, conv_per_dec_block=4, filters=32)
+        super().__init__()
 
         # has to be a CNN with input
         self.cnn_block = cnn_block
@@ -85,11 +87,12 @@ class LambdaCNN(nn.Module):
 
 
 class DcompCNN(nn.Module):
-    def __init__(self, cnn_block=Unet(2, channels_in=2, channels_out=1, layer=1, conv_per_dec_block=4, filters=32)):
-        super(DcompCNN, self).__init__()
-
-        # has to be a CNN with input
-        self.cnn_block = cnn_block
+    def __init__(self, cnn_block=None):
+        super().__init__()
+        if cnn_block is None:
+            self.cnn_block = Unet(2, channels_in=2, channels_out=1, layer=1, conv_per_dec_block=4, filters=32)
+        else:
+            self.cnn_block = cnn_block
 
     def forward(self, k):
         k = torch.mean(k, dim=(1, 3))
@@ -128,7 +131,7 @@ class NNPDHG4DynMRIwTVNN(nn.Module):
         csm_unet=Unet(2, channels_in=20, channels_out=20, layer=4, conv_per_dec_block=2, filters=16),
         T=64,
     ):
-        super(NNPDHG4DynMRIwTVNN, self).__init__()
+        super().__init__()
 
         # MR encoding objects
         self.Dyn2DEncObj = Dyn2DEncObj

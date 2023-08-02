@@ -16,7 +16,7 @@ class ConvDicoLearnFISTANN(nn.Module):
     """ """
 
     def __init__(self, Dyn2DEncObj, T=1, n_filters=8, kernel_size=[7, 7, 7], lambda_reg=5e-7):
-        super(ConvDicoLearnFISTANN, self).__init__()
+        super().__init__()
 
         # MR encoding objects
         self.Dyn2DEncObj = Dyn2DEncObj
@@ -61,7 +61,9 @@ class ConvDicoLearnFISTANN(nn.Module):
 
         # prepare filter
         d = torch.cat(2 * [self.d_filter], dim=0).to(s.device)
-        Ds = F.conv_transpose3d(F.pad(s, self.npad, mode="circular"), d, groups=2, padding=[self.npad[0], self.npad[2], self.npad[4]])
+        Ds = F.conv_transpose3d(
+            F.pad(s, self.npad, mode="circular"), d, groups=2, padding=[self.npad[0], self.npad[2], self.npad[4]]
+        )
         Ds = Ds[:, :, self.npad[0] : -self.npad[1], self.npad[2] : -self.npad[3], self.npad[4] : -self.npad[5]]
 
         Ds = rearrange(Ds, "(b z) ch u f t -> b z t u f ch", b=Nb, z=Nz, ch=2)

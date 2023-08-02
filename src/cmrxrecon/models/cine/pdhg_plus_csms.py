@@ -11,7 +11,7 @@ from cmrxrecon.models.utils.cg import conj_grad
 
 class Laplace2DCSM(nn.Module):
     def __init__(self):
-        super(Laplace2DCSM, self).__init__()
+        super().__init__()
         self.laplace_kernel = torch.tensor([[1.0, 1.0, 1.0], [1.0, -8.0, 1.0], [1.0, 1.0, 1.0]]).unsqueeze(0)
 
     def apply_L(self, csm):
@@ -135,7 +135,9 @@ class PDHG4DynMRIwTVPlusCSMs(nn.Module):
         lambda_reg_log_t = self.lambda_reg_log_t.unsqueeze(0)
 
         # conatentae xy -and t-lambda
-        lambda_reg_log = torch.cat([lambda_reg_log_t, lambda_reg_log_xy]).unsqueeze(0).unsqueeze(-1).unsqueeze(-1).unsqueeze(-1).unsqueeze(-1)
+        lambda_reg_log = (
+            torch.cat([lambda_reg_log_t, lambda_reg_log_xy]).unsqueeze(0).unsqueeze(-1).unsqueeze(-1).unsqueeze(-1).unsqueeze(-1)
+        )
         lambda_reg = torch.exp(lambda_reg_log)
 
         return lambda_reg
@@ -201,7 +203,9 @@ class PDHG4DynMRIwTVPlusCSMs(nn.Module):
             # solve CG
             if self.T_csm != 0:
                 eps = 1e-8
-                AHxAx = lambda csm: self.Dyn2DEncObj.apply_AHxAx(csm, x1 + eps, mask) + lambda_csm * (csm - 2 * self.LaplaceOps.apply_L(csm) - self.LaplaceOps.apply_L(self.LaplaceOps.apply_L(csm)))
+                AHxAx = lambda csm: self.Dyn2DEncObj.apply_AHxAx(csm, x1 + eps, mask) + lambda_csm * (
+                    csm - 2 * self.LaplaceOps.apply_L(csm) - self.LaplaceOps.apply_L(self.LaplaceOps.apply_L(csm))
+                )
 
                 rhs = self.Dyn2DEncObj.apply_AHx(y, x1 + eps, mask)
 

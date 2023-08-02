@@ -21,11 +21,11 @@ class GradOperators(torch.nn.Module):
             kernel[idx] = kern
         return kernel
 
-    def __init__(self, dim:int=2, mode:str="doublecentral", padmode:str = "circular"):
+    def __init__(self, dim: int = 2, mode: str = "doublecentral", padmode: str = "circular"):
         """
         An Operator for finite Differences / Gradients
         Implements the forward as apply_G and the adjoint as apply_GH.
-        
+
         Args:
             dim (int, optional): Dimension. Defaults to 2.
             mode (str, optional): one of doublecentral, central, forward or backward. Defaults to "doublecentral".
@@ -35,9 +35,13 @@ class GradOperators(torch.nn.Module):
         self.register_buffer("kernel", self.diff_kernel(dim, mode), persistent=False)
         self._dim = dim
         self._conv = (torch.nn.functional.conv1d, torch.nn.functional.conv2d, torch.nn.functional.conv3d)[dim - 1]
-        self._convT = (torch.nn.functional.conv_transpose1d, torch.nn.functional.conv_transpose2d, torch.nn.functional.conv_transpose3d)[dim - 1]
+        self._convT = (
+            torch.nn.functional.conv_transpose1d,
+            torch.nn.functional.conv_transpose2d,
+            torch.nn.functional.conv_transpose3d,
+        )[dim - 1]
         self._pad = partial(torch.nn.functional.pad, pad=2 * dim * (1,), mode=padmode)
-        if mode == 'central':
+        if mode == "central":
             self._norm = (self.dim) ** (1 / 2)
         else:
             self._norm = (self.dim * 4) ** (1 / 2)
@@ -45,7 +49,7 @@ class GradOperators(torch.nn.Module):
     @property
     def dim(self):
         return self._dim
-    
+
     def apply_G(self, x):
         """
         Forward
@@ -81,8 +85,7 @@ class GradOperators(torch.nn.Module):
         else:
             y = y.reshape(*x.shape[: -self.dim - 1], *x.shape[-self.dim :])
         return y
-    
-  
+
     def apply_GHG(self, x):
         if x.is_complex():
             xr = torch.view_as_real(x).moveaxis(-1, 0)
@@ -101,13 +104,12 @@ class GradOperators(torch.nn.Module):
         return y
 
     def forward(self, x, direction=1):
-        if direction>0:
+        if direction > 0:
             return self.apply_G(x)
-        elif direction<0:
+        elif direction < 0:
             return self.apply_GH(x)
         else:
             return self.apply_GHG(x)
-
 
     @property
     def normGHG(self):

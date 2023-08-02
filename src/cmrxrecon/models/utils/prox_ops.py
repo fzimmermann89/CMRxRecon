@@ -4,7 +4,7 @@ import torch.nn as nn
 
 class ClipAct(nn.Module):
     def __init__(self):
-        super(ClipAct, self).__init__()
+        super().__init__()
 
     def forward(self, x, threshold):
         is_complex = x.is_complex()
@@ -22,7 +22,7 @@ class ClipAct(nn.Module):
 
 class SoftShrinkAct(nn.Module):
     def __init__(self):
-        super(SoftShrinkAct, self).__init__()
+        super().__init__()
 
     def forward(self, x, threshold):
         is_complex = x.is_complex()
