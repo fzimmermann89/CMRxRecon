@@ -268,15 +268,19 @@ class CSMFreeMultiCoilDataConsPDNetwork(nn.Module):
         # prox_g_unet = Unet(3, channels_in=40, channels_out=20, layer=3, n_convs_per_stage=2, filters=48),
         # prox_fstar_unet = Unet(3, channels_in=60, channels_out=20, layer=3, n_convs_per_stage=2, filters=32),
         # FOR EXPERIMENTS
-        prox_g_unet=Unet_felix(
-            3, channels_in=40, channels_out=20, layer=3, conv_per_enc_block=2, conv_per_dec_block=2, filters=32
-        ),
-        prox_fstar_unet=Unet_felix(
-            3, channels_in=60, channels_out=20, layer=3, conv_per_enc_block=2, conv_per_dec_block=2, filters=32
-        ),
+        prox_g_unet=None,
+        prox_fstar_unet=None,
         T=4,
     ):
         super().__init__()
+        if prox_g_unet is None:
+            prox_g_unet = Unet_felix(
+                3, channels_in=40, channels_out=20, layer=3, conv_per_enc_block=2, conv_per_dec_block=2, filters=32
+            )
+        if prox_fstar_unet is None:
+            prox_fstar_unet = Unet_felix(
+                3, channels_in=60, channels_out=20, layer=3, conv_per_enc_block=2, conv_per_dec_block=2, filters=32
+            )
 
         self.prox_g_cnn = ProxG(prox_g_unet)
         self.prox_fstar_cnn = ProxFstarV2(prox_fstar_unet)
