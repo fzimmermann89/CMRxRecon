@@ -30,6 +30,7 @@ class ResidualCBlock(nn.Module, EmbLayer):
         emb_dim: int = 0,
         split_dim: bool = False,
         resZero=True,
+        coordconv=False,
     ):
         """
         Convolutions from features[0]->features[1]->...->features[-1] with residual connection
@@ -53,6 +54,7 @@ class ResidualCBlock(nn.Module, EmbLayer):
             split_dim=split_dim,
             emb_dim=emb_dim,
             final_norm=final_norm,
+            coordconv=coordconv,
         )
         self.resConv = ConvNd(dim)(features[0], features[-1], kernel_size=1, bias=True) if features[0] != features[-1] else None
 
@@ -60,7 +62,7 @@ class ResidualCBlock(nn.Module, EmbLayer):
             nn.init.zeros_(self.block[-1].bias)
 
         self.final_activation: Optional[nn.Module] = activation() if final_activation else None
-        self.alpha = nn.Parameter(1e-3 * torch.ones(1)) if resZero else None
+        self.alpha = nn.Parameter(1e-2 * torch.ones(1)) if resZero else None
 
     def forward(self, x, emb=None):
         ret = self.block(x, emb)
@@ -111,6 +113,7 @@ class CBlock(SequentialEmb):
         stride: int = 1,
         emb_dim: int = 0,
         split_dim: bool = False,
+        coordconv: bool = False,
     ):
         """
         Convolutions from features[0]->features[1]->...->features[-1] with activation, optional norm and optional dropout
@@ -141,9 +144,16 @@ class CBlock(SequentialEmb):
         conv = partial(
             ConvNd(dim), kernel_size=conv_kernel_size, padding=padding, groups=groups, padding_mode=padding_mode, stride=stride
         )
+        if coordconv:
+            coordconv = partial(
+                CoordConvNd, dim=dim, kernel_size=conv_kernel_size, padding=padding, padding_mode=padding_mode, stride=stride
+            )
         modules = []
         for i, (fin, fout) in enumerate(zip(features[:-1], features[1:])):
-            modules.append(conv(fin, fout, bias=i == len(features) - 2 if bias == "last" else bias))
+            if coordconv and i == 0:
+                modules.append(coordconv(in_channels=fin, out_channels=fout, bias=False if bias == "last" else bias))
+            else:
+                modules.append(conv(fin, fout, bias=i == len(features) - 2 if bias == "last" else bias))
             if i == 1 and split_dim:
                 modules.append(conv_split(fout, fout, bias=False))
             if dropout:
