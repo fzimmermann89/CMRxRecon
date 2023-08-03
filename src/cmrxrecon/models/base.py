@@ -55,7 +55,7 @@ class DefaultOptimizerMixin(ABC):
                 optimizer,
                 max_lr=self.hparams.lr,
                 total_steps=self.trainer.estimated_stepping_batches,
-                pct_start=0.05,
+                pct_start=0.1,
                 anneal_strategy="cos",
                 cycle_momentum=True,
                 div_factor=10,

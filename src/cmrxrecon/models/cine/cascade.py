@@ -1,8 +1,10 @@
+from typing import Any, Mapping
 import torch
 import einops
 from cmrxrecon.nets.unet import Unet
 from cmrxrecon.nets.mlp import MLP
 from typing import *
+import torch._dynamo
 from . import CineModel
 from cmrxrecon.models.utils.crop import crops_by_threshold, uncrop
 from cmrxrecon.models.utils.ema import EMA
@@ -10,6 +12,7 @@ from cmrxrecon.models.utils import rss
 from cmrxrecon.models.utils.mapper import Mapper
 from cmrxrecon.models.utils.multicoildc import MultiCoilDCLayer
 import gc
+from cmrxrecon.models.utils.ssim import ssim
 
 
 class CNNWrapper(torch.nn.Module):
@@ -36,7 +39,6 @@ class CNNWrapper(torch.nn.Module):
             xc = x
             x_rss_c = x_rss
             crops = None
-
         net_input = einops.rearrange(torch.view_as_real(xc), "b c z t x y r -> (b z) (r c) t x y")
         if self.include_rss:
             if x_rss is None:
@@ -114,13 +116,16 @@ class CascadeNet(torch.nn.Module):
         pred = rss(x[-1])
         return dict(prediction=pred, rss=x_rss, xs=x)
 
+    def load_state_dict(self, state_dict: Mapping[str, Any], strict: bool = True):
+        return super().load_state_dict(state_dict, strict)
+
 
 class Cascade(CineModel):
     def __init__(
         self,
         input_rss=True,
-        lr=8e-4,
-        weight_decay=1e-5,
+        lr=1e-3,
+        weight_decay=1e-4,
         schedule=True,
         Nc: int = 10,
         T: int = 3,
@@ -129,6 +134,7 @@ class Cascade(CineModel):
         **kwargs,
     ):
         super().__init__()
+        torch._dynamo.config.suppress_errors = True
         unet_args = dict(
             dim=2.5,
             layer=3,
@@ -183,8 +189,10 @@ class Cascade(CineModel):
             gready_loss = sum([torch.nn.functional.mse_loss(rss(x), gt) for x in ret["xs"][:-1]])
         else:
             gready_loss = 0.0
+        ssimloss = 1 - ssim(gt, prediction)
+
         self.log("train_advantage", (rss_loss - loss) / rss_loss, on_step=True, on_epoch=True, prog_bar=True, logger=True)
         self.log("train_loss", loss, on_step=True, on_epoch=True, prog_bar=False, logger=True)
         self.log("rss_loss", rss_loss, on_step=True, on_epoch=True, prog_bar=False, logger=True)
-        loss = 0.8 * loss + 0.2 * gready_loss
+        loss = 0.6 * loss + 0.2 * gready_loss + 0.2 * ssimloss
         return loss
