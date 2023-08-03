@@ -1,10 +1,8 @@
-from typing import Union, Optional, Tuple, Callable
+from typing import Union, Optional, Tuple, Callable, Literal, List
 from functools import partial
 import torch
 import math
 from torch import nn
-from itertools import cycle
-
 from .blocks import *
 
 
@@ -55,15 +53,16 @@ class Unet(nn.Module):
         up_mode="linear",
         down_mode="maxpool",
         activation: Union[str, Callable[..., nn.Module]] = "relu",
-        feature_growth: Callable[[int], float] | tuple[float, ...] | float = 2.0,
+        feature_growth: Union[Callable[[int], float], Tuple[float, ...], float] = 2.0,
         groups_enc: int = 1,
         groups_dec: int = 1,
         groups_last: int = 1,
         additional_last_decoder: int = 0,
-        change_filters_last=True,
-        emb_dim=0,
-        skip_add=False,
+        change_filters_last: bool = True,
+        emb_dim: int = 0,
+        skip_add: bool = False,
         downsample_dimensions: Optional[Tuple[Tuple[int, ...], ...]] = None,
+        coordconv: Union[Literal["first"], bool, Tuple[Union[Tuple[bool, ...], bool]]] = False,
     ):
         """
         A mostly vanilla UNet with linear final activation
@@ -91,8 +90,23 @@ class Unet(nn.Module):
         change_filters_last: Increase number of filters in last step of a block
         skip_add: Do an add of the skipped connection to the upsampled instead of a concat
         downsample_dimensions: Dimensions to downsample. None: 2D: (-1,-2), 3D: (-1,-2,-3), 2.5D: (-1,-2)
+        coordconv: use coordconv as first conv. either bool or tuple[tuple[bool,...]|bool,tuple[bool,...]|bool] for each block of encoder/decoder
         """
         super().__init__()
+
+        if coordconv == "first":
+            cc_enc, cc_dec = (True,) + (False,) * layer, False
+        elif isinstance(coordconv, bool):
+            cc_enc, cc_dec = coordconv, coordconv
+        else:
+            cc_enc, cc_dec = coordconv
+        if isinstance(cc_enc, bool):
+            cc_enc = (cc_enc,) * (layer + 1)
+        if isinstance(cc_dec, bool):
+            cc_dec = (cc_dec,) * layer
+        cc_enc = cc_enc + (False,) * (layer + 1 - len(cc_enc))
+        cc_dec = cc_dec + (False,) * (layer - len(cc_dec))
+        coordconv = (cc_enc, cc_dec)
 
         if not (isinstance(residual, bool) or residual in ("outer", "inner", "both", "none")):
             raise ValueError("residual must be bool or 'outer'/'inner'/'both'/'none'")
@@ -122,20 +136,21 @@ class Unet(nn.Module):
         if downsample_dimensions is None:
             downsample_dimensions = (tuple(range(-dim + half_dim, 0)),)
 
-        def calulate_window(dim: int, factor: float, active_dim: tuple[int, ...]) -> tuple[int | float, ...]:
+        def calulate_window(dim: int, factor: float, active_dim: Tuple[int, ...]) -> Tuple[int | float, ...]:
             ret = [1] * dim
             for d in active_dim:
                 ret[d] = factor
             return tuple(ret)
 
-        _downsamplings = []
+        _downsamplings: List[Callable] = []
+        downsampling: Callable
         for d in downsample_dimensions:
             if down_mode == "maxpool":
                 pooling_window = pooling_stride = calulate_window(dim, 2, d)
-                downsampling = lambda *_: MaxPoolNd(dim)(pooling_window, pooling_stride)
+                downsampling = partial(lambda *_, **kw: MaxPoolNd(dim)(**kw), kernel_size=pooling_window, stride=pooling_stride)
             elif down_mode == "averagepool":
                 pooling_window = pooling_stride = calulate_window(dim, 2, d)
-                downsampling = lambda *_: AvgPoolNd(dim)(pooling_window, pooling_stride)
+                downsampling = partial(lambda *_, **kw: AvgPoolNd(dim)(**kw), kernel_size=pooling_window, stride=pooling_stride)
             elif down_mode == "conv":
                 pooling_window = calulate_window(dim, kernel_size, d)
                 pooling_stride = calulate_window(dim, 2, d)
@@ -146,7 +161,7 @@ class Unet(nn.Module):
             else:
                 raise NotImplementedError(f"unknown down_mode {down_mode}")
             _downsamplings.append(downsampling)
-        downsamplings = cycle(_downsamplings)
+        downsamplings = (_downsamplings + [_downsamplings[-1]] * (layer - len(_downsamplings)))[:layer]
 
         reduce_upsampling = "reduce" in up_mode
 
@@ -157,7 +172,7 @@ class Unet(nn.Module):
             final_norm = True
 
         upm = up_mode.split("_")[0]
-        _upsamplings = []
+        _upsamplings: list[Callable] = []
         for d in downsample_dimensions:
             if upm == "conv":
                 window = calulate_window(dim, kernel_size & ~1, d)
@@ -165,13 +180,19 @@ class Unet(nn.Module):
                 upsampling = partial(ConvTransposeNd(dim), kernel_size=window, stride=stride, bias=bias)
             elif upm in ("nearest", "linear", "cubic"):
                 factor = calulate_window(dim, 2, d)
-                upsampling = lambda in_channels, out_channels: Upsample(
-                    dim=dim, factor=factor, mode=upm, conv_channels=(in_channels, out_channels), keep_leading_dim=half_dim
+                window = calulate_window(dim, 3, d)
+                upsampling = partial(
+                    lambda in_channels, out_channels, **kw: Upsample(conv_channels=(in_channels, out_channels), **kw),
+                    dim=dim,
+                    factor=factor,
+                    mode=upm,
+                    keep_leading_dim=False,
                 )
+
             else:
                 raise NotImplementedError(f"unknown up_mode {up_mode}")
             _upsamplings.append(upsampling)
-        upsamplings = cycle(_upsamplings)
+        upsamplings = (_upsamplings + [_upsamplings[-1]] * (layer - len(_upsamplings)))[:layer]
 
         block = partial(
             ResidualCBlock if residual in ("inner", True, "both") else CBlock,
@@ -208,17 +229,19 @@ class Unet(nn.Module):
             if not (reduce_upsampling or skip_add):
                 factor = feature_growth(depth + 1)
             features_dec.append((last + int(factor * last) & ~1,) + (last,) * conv_per_dec_block)
-        net = block(features_enc[-1])
-        for fenc, fdec, fup, fdown, downsampling, upsampling in zip(
+        net = block(features_enc[-1], coordconv=coordconv[0][-1])
+        for fenc, fdec, fup, fdown, downsampling, upsampling, coordconv_enc, coordconv_dec in zip(
             features_enc[-2::-1],
             features_dec[-2::-1],
             features_enc[-1::-1],
             features_enc[-3::-1] + [[1]],
-            downsamplings,
-            upsamplings,
+            downsamplings[::-1],
+            upsamplings[::-1],
+            coordconv[0][-2::-1],
+            coordconv[1][-1::-1],
         ):
-            decoder = SequentialEmb(join, block(fdec, groups=groups_dec, emb_dim=emb_dim))
-            encoder = block(fenc, groups=groups_enc, emb_dim=emb_dim)
+            decoder = SequentialEmb(join, block(fdec, groups=groups_dec, emb_dim=emb_dim, coordconv=coordconv_dec))
+            encoder = block(fenc, groups=groups_enc, emb_dim=emb_dim, coordconv=coordconv_enc)
             up = upsampling(fup[-1], fdec[0] if skip_add else fdec[0] - fenc[-1])
             down = downsampling(fenc[-1], fup[0])
             net = UnetLayer(encoder, down, net, up, decoder)
