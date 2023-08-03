@@ -15,8 +15,7 @@ class EMA(torch.nn.Module):
         super().__init__()
         self.alpha = alpha
         self.register_buffer("ema", torch.tensor(0.0))
-        self.register_buffer("ema_unbiased", torch.tensor(1.0))
-
+        self.register_buffer("ema_unbiased", torch.tensor(float("nan")))
         self.iter: int = 0
         self.max_iter = max_iter
 
@@ -25,7 +24,7 @@ class EMA(torch.nn.Module):
             x: torch.Tensor = input()
         else:
             x: torch.Tensor = input
-        if self.iter == 0:
+        if torch.isnan(self.ema_unbiased):
             self.ema_unbiased = x
         if not self.training or self.iter > self.max_iter:
             return self.ema_unbiased
@@ -33,7 +32,3 @@ class EMA(torch.nn.Module):
         self.iter += 1
         self.ema_unbiased = self.ema / (1 - self.alpha**self.iter)
         return self.ema_unbiased
-
-    @property
-    def ema_unbiased(self):
-        return self.ema / (1 - self.alpha**self.iter)
