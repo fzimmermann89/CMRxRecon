@@ -124,13 +124,12 @@ class NNPDHG4DynMRIwTVNN(nn.Module):
 
     """
 
-    def __init__(
-        self,
-        Dyn2DEncObj,
-        lambda_unet=Unet(3, channels_in=2, channels_out=2, layer=1, conv_per_dec_block=4, filters=8),
-        csm_unet=Unet(2, channels_in=20, channels_out=20, layer=4, conv_per_dec_block=2, filters=16),
-        T=64,
-    ):
+    def __init__(self, Dyn2DEncObj, lambda_unet=None, csm_unet=None, T=64):
+        if lambda_unet is None:
+            lambda_unet = Unet(3, channels_in=2, channels_out=2, layer=1, conv_per_dec_block=4, filters=8)
+        if csm_unet is None:
+            csm_unet = Unet(2, channels_in=20, channels_out=20, layer=4, conv_per_dec_block=2, filters=16)
+
         super().__init__()
 
         # MR encoding objects
