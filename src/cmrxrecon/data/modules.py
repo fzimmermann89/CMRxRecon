@@ -8,7 +8,13 @@ from typing import Optional, Literal
 import pytorch_lightning as pl
 from collections import defaultdict
 from .utils import MultiDataSets, MultiDataSetsSampler
-from .augments import RandomShuffleAlongDimensions, RandomKFlipUndersampled, RandomPhase, RandomFlipAlongDimensions, AugmentDataset
+from .augments import (
+    RandomShuffleAlongDimensions,
+    RandomKFlipUndersampled,
+    RandomPhase,
+    RandomFlipAlongDimensions,
+    AugmentDataset,
+)
 from functools import partial
 
 
@@ -22,7 +28,7 @@ class CineData(pl.LightningDataModule):
         singleslice: bool = True,
         center_lines: int = 24,
         random_acceleration: bool = True,
-        acceleration: tuple[int, ...] = (4,8,10),
+        acceleration: tuple[int, ...] = (4, 8, 10),
         return_csm: bool = False,
         test_data_dir: Optional[str] = "files/MultiCoil/Cine/ValidationSet",
     ):
@@ -84,7 +90,10 @@ class CineData(pl.LightningDataModule):
             else:
                 del paths[val_size]
 
-            datasets = [CineDataDS(path, singleslice=self.singleslice, return_csm=return_csm, augments=augments, **self.kwargs) for path in paths.values()]
+            datasets = [
+                CineDataDS(path, singleslice=self.singleslice, return_csm=return_csm, augments=augments, **self.kwargs)
+                for path in paths.values()
+            ]
 
             self.train_multidatasets = MultiDataSets(datasets)
             self.val_dataset = CineDataDS(val_ds, singleslice=self.singleslice, return_csm=return_csm, **self.kwargs)
@@ -92,7 +101,9 @@ class CineData(pl.LightningDataModule):
             self.train_multidatasets = None
             self.val_dataset = None
         if test_data_dir is not None and test_data_dir != "":
-            self.test_dataset = CineTestDataDS(test_data_dir, axis=self.axis, singleslice=self.singleslice, return_csm=self.return_csm)
+            self.test_dataset = CineTestDataDS(
+                test_data_dir, axis=self.axis, singleslice=self.singleslice, return_csm=self.return_csm
+            )
 
     def train_dataloader(self):
         if self.train_multidatasets is None:
@@ -222,7 +233,9 @@ class MappingData(pl.LightningDataModule):
         else:
             del paths[val_size]
 
-        datasets = [MappingDataDS(path, singleslice=self.singleslice, return_csm=return_csm, **self.kwargs) for path in paths.values()]
+        datasets = [
+            MappingDataDS(path, singleslice=self.singleslice, return_csm=return_csm, **self.kwargs) for path in paths.values()
+        ]
 
         self.train_multidatasets = MultiDataSets(datasets)
         self.val_dataset = MappingDataDS(val_ds, singleslice=self.singleslice, return_csm=return_csm, **self.kwargs)
