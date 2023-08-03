@@ -233,6 +233,7 @@ class Upsample(nn.Module):
         mode: str = "linear",
         conv_channels: Optional[Tuple[int, int]] = None,
         keep_leading_dim=False,
+        kernel_size: Union[int, Tuple[int, ...]] = 3,
     ):
         super().__init__()
 
@@ -255,11 +256,13 @@ class Upsample(nn.Module):
             sample = EinopsToAndFrom("b c h ...", "b (c h) ...", sample)
 
         if conv_channels is not None:
+            if isinstance(kernel_size, int):
+                kernel_size = (1,) * keep_leading_dim + rdim * (kernel_size,)
             in_channels, out_channels = conv_channels
             conv = ConvNd(dim)(
                 in_channels,
                 out_channels,
-                kernel_size=(1,) * keep_leading_dim + rdim * (3,),
+                kernel_size=kernel_size,
                 bias=False,
                 padding="same",
                 padding_mode="replicate",
