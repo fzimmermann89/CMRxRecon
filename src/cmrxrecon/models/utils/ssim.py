@@ -1,7 +1,6 @@
 import torch
 
 
-@torch.jit.script
 def ssim(gt, pred):
     """Computes the Structural Similarity Index (SSIM) between two images.
     with K1 = 0.01 and K2 = 0.03 and uniform window size 7x7.
