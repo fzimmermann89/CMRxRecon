@@ -103,7 +103,14 @@ class CineDataDS(Dataset):
         k[:, :, :, mask, :] = k_data
         mask = torch.as_tensor(mask[None, None, :, None])
         gt = torch.as_tensor(gt)
-        ret = {"k": k, "mask": mask, "gt": gt, "acceleration": float(acceleration), "offset": float(offset), "axis": float("sax" in self.filenames[filenr].name)}
+        ret = {
+            "k": k,
+            "mask": mask,
+            "gt": gt,
+            "acceleration": float(acceleration),
+            "offset": float(offset),
+            "axis": float("sax" in self.filenames[filenr].name),
+        }
         if self.return_csm:
             csm = torch.view_as_complex(torch.as_tensor(csm)).swapaxes(0, 1) if self.return_csm else None
             ret["csm"] = csm
@@ -191,7 +198,7 @@ class CineTestDataDS(Dataset):
             k_data_centered = np.array(data[:, selection]).view(np.complex64)  # (t,z,c,us,fs)
         k_data = self._shift(k_data_centered).transpose((2, 1, 0, 3, 4))  # (c,z,t,us,fs)
         k_data = k_data.astype(np.complex64)
-        mask = (~np.isclose(k_data[:1, ..., :, :1], 0)).astype(np.float32)
+        mask = (~np.isclose(k_data[0, ..., :, :1], 0)).astype(np.float32)
         axis = float("sax" in filename.stem.split("_")[-1])
         acc_idx = str(filename).find("AccFactor")
         acceleration = float(str(filename)[acc_idx + 9 : acc_idx + 11])
