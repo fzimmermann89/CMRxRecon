@@ -180,7 +180,9 @@ def NormNd(
     if "group" in normtype:
         gstr = normtype.split("group")[1]
         g = int(gstr) if gstr.isdigit() else 8
-        return lambda num_channels, *args, **kwargs: nn.GroupNorm(num_groups=g, num_channels=num_channels, *args, **kwargs)
+        return lambda num_channels, *args, **kwargs: partial(nn.GroupNorm, num_groups=g)(
+            num_channels=num_channels, *args, **kwargs
+        )
 
     raise ValueError("normtype must be batch, instance or layer")
 
