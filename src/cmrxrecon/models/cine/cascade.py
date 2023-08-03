@@ -9,6 +9,7 @@ from cmrxrecon.models.utils.ema import EMA
 from cmrxrecon.models.utils import rss
 from cmrxrecon.models.utils.mapper import Mapper
 from cmrxrecon.models.utils.multicoildc import MultiCoilDCLayer
+import gc
 
 
 class CNNWrapper(torch.nn.Module):
@@ -49,33 +50,30 @@ class CNNWrapper(torch.nn.Module):
         return x + x_net
 
 
-class CascadeNN(torch.nn.Module):
-    def __init__(self, input_rss=True, Nc: int = 10, T: int = 2, **kwargs):
+class CascadeNet(torch.nn.Module):
+    def __init__(
+        self, unet_args=None, input_rss=True, Nc: int = 10, T: int = 2, embed_dim=128, crop_threshold: float = 0.005, **kwargs
+    ):
         super().__init__()
         self.input_rss = input_rss
         embed_dim: int = 128
-        net = Unet(
-            dim=2.5,
-            channels_in=input_rss + 2 * Nc,
-            channels_out=2 * Nc,
-            layer=3,
-            filters=64,
-            padding_mode="zeros",
-            residual="inner",
-            # residual=False,
-            # norm=False,
-            norm="group8",
-            feature_growth=lambda d: (1, 2, 1.5, 1.34, 1, 1)[d],
-            activation="leakyrelu",
-            change_filters_last=False,
-            emb_dim=embed_dim,
-            downsample_dimensions=((-1, -2), (-1, -2, -3), (-1, -2, -3), (-1, -2, -3), (-1, -2, -3), (-1, -2, -3)),
-        )
+        if unet_args is None:
+            unet_args = dict(
+                dim=2,
+                layer=3,
+                filters=32,
+                change_filters_last=False,
+                feature_growth=(1, 2, 1, 1, 1, 1),
+            )
+
+        net = Unet(channels_in=input_rss + 2 * Nc, channels_out=2 * Nc, emb_dim=embed_dim // 2, **unet_args)
+
         with torch.no_grad():
             net.last[0].bias.zero_()
-        self.net = CNNWrapper(net, include_rss=input_rss)
 
-        self.dc = torch.jit.script(MultiCoilDCLayer(Nc, embed_dim=embed_dim))  # torch.jit.script(
+        self.net = CNNWrapper(net, include_rss=input_rss, crop_threshold=crop_threshold)
+
+        self.dc = torch.jit.script(MultiCoilDCLayer(Nc, embed_dim=embed_dim // 2))
 
         self.embed_augment_channels = 6
         self.embed_axis_channels = 2
@@ -107,8 +105,9 @@ class CascadeNN(torch.nn.Module):
         for t in range(self.T):
             iteration_info = self.embed_iter_map(t * torch.ones(k.shape[0], 1, device=k.device))
             z = self.embed_net(torch.cat((static_info, iteration_info), dim=-1))
-            x_net = self.net(x[-1], z, x_rss=None if t else x_rss)
-            x_dc = self.dc(k, x_net, mask, z)
+            zlambda, znet = torch.chunk(z, 2, dim=1)
+            x_net = self.net(x[-1], znet, x_rss=None if t else x_rss)
+            x_dc = self.dc(k, x_net, mask, zlambda)
             # x.append(x_net)
             x.append(x_dc)
 
@@ -117,9 +116,47 @@ class CascadeNN(torch.nn.Module):
 
 
 class Cascade(CineModel):
-    def __init__(self, input_rss=True, lr=5e-4, weight_decay=1e-5, schedule=True, Nc: int = 10, T: int = 3, **kwargs):
+    def __init__(
+        self,
+        input_rss=True,
+        lr=8e-4,
+        weight_decay=1e-5,
+        schedule=True,
+        Nc: int = 10,
+        T: int = 3,
+        embed_dim=128,
+        crop_threshold: float = 0.005,
+        **kwargs,
+    ):
         super().__init__()
-        self.net = CascadeNN(input_rss=input_rss, Nc=Nc, T=T, **kwargs)
+        unet_args = dict(
+            dim=2.5,
+            layer=3,
+            filters=48,
+            padding_mode="zeros",
+            residual="inner",
+            # residual=False,
+            # norm=False,
+            norm="group16",
+            feature_growth=(1, 2, 1.5, 1.34, 1, 1),
+            activation="leakyrelu",
+            change_filters_last=False,
+            downsample_dimensions=((-1, -2), (-1, -2, -3), (-1, -2, -3), (-1, -2, -3), (-1, -2, -3), (-1, -2, -3)),
+            coordconv=((True, False), False),
+        )
+
+        unet_args.update(kwargs.pop("unet_args", {}))
+        self.save_hyperparameters({"unet_args": unet_args})
+
+        self.net = CascadeNet(
+            unet_args=unet_args,
+            input_rss=input_rss,
+            Nc=Nc,
+            T=T,
+            embed_dim=embed_dim,
+            crop_threshold=crop_threshold,
+            **kwargs,
+        )
         self.EMANorm = EMA(alpha=0.9, max_iter=100)
 
     def forward(self, k: torch.Tensor, mask: torch.Tensor, **other) -> dict:
@@ -135,14 +172,15 @@ class Cascade(CineModel):
     def training_step(self, batch, batch_idx):
         gt = batch.pop("gt")
         norm = self.EMANorm(1 / gt.std())
-
-        gt = gt * norm
+        gt *= norm
+        gc.collect()
+        torch.cuda.synchronize()
         ret = self(**batch)
         prediction, x_rss = ret["prediction"], ret["rss"]
         loss = torch.nn.functional.mse_loss(prediction, gt)
         rss_loss = torch.nn.functional.mse_loss(x_rss, gt)
         if "xs" in ret and self.trainer.global_step < 5000:
-            gready_loss = sum([torch.nn.functional.mse_loss(rss(x), gt) for x in ret["xs"]])
+            gready_loss = sum([torch.nn.functional.mse_loss(rss(x), gt) for x in ret["xs"][:-1]])
         else:
             gready_loss = 0.0
         self.log("train_advantage", (rss_loss - loss) / rss_loss, on_step=True, on_epoch=True, prog_bar=True, logger=True)
