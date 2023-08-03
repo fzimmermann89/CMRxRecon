@@ -39,6 +39,7 @@ class CLI(LightningCLI):
             }
             config.trainer.logger = [tensorboardlogger, neptunelogger]
         else:
+            config.trainer.logger = None
             self.save_config_callback = None
 
 
