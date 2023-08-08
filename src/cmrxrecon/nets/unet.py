@@ -143,7 +143,7 @@ class Unet(nn.Module):
         half_dim = math.isclose(fdim - math.floor(fdim), 0.5)
 
         if isinstance(latents, (bool, int, str)):
-            latents = (latents,) * layer
+            latents = (latents,) * (layer + 1)
         else:
             latents = latents + (False,) * (layer - len(latents) + 1)
         self.latent = False
