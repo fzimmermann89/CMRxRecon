@@ -131,13 +131,13 @@ class Cascade(CineModel):
         T: int = 3,
         embed_dim=128,
         crop_threshold: float = 0.005,
-        greedy_steps: int = 5000,
-        l2_weight: float = 0.6,
-        ssim_weight: float = 0.2,
-        greedy_weight: float = 0.2,
-        l1_weight: float = 0.0,
-        charbonnier_weight: float = 0.0,
-        max_weight: float = 0.0,
+        phase2_pct: float = 0.5,
+        l2_weight: tuple[float, float] | float = 0.6,
+        ssim_weight: tuple[float, float] | float = 0.2,
+        greedy_weight: tuple[float, float] | float = (0.2, 0.0),
+        l1_weight: tuple[float, float] | float = 0.0,
+        charbonnier_weight: tuple[float, float] | float = 0.0,
+        max_weight: tuple[float, float] | float = 0.0,
         **kwargs,
     ):
         super().__init__()
@@ -182,6 +182,16 @@ class Cascade(CineModel):
             ret["xs"] = [x * unnorm for x in ret["xs"]]
         return ret
 
+    def get_weights(self):
+        keys = ["l2_weight", "ssim_weight", "greedy_weight", "l1_weight", "charbonnier_weight", "max_weight"]
+        ret = {}
+        for k in keys:
+            v = self.hparams[k]
+            if isinstance(v, tuple):
+                v = v[self.trainer.global_step >= self.trainer.max_steps * self.hparams.phase2_pct]
+            ret[k] = v
+        return ret
+
     def training_step(self, batch, batch_idx):
         gt = batch.pop("gt")
         norm = self.EMANorm(1 / gt.std())
@@ -191,29 +201,31 @@ class Cascade(CineModel):
         ret = self(**batch)
         prediction, x_rss = ret["prediction"], ret["rss"]
 
+        weights = self.get_weights()
         loss = 0.0
         rss_loss = torch.nn.functional.mse_loss(x_rss, gt)
         l2_loss = torch.nn.functional.mse_loss(prediction, gt)
-        if self.hparams.l2_weight:
-            loss = loss + self.hparams.l2_weight * l2_loss
-        if self.hparams.ssim_weight:
-            ssim_loss = 1 - ssim(gt, prediction)
-            loss = loss + self.hparams.ssim_weight * ssim_loss
-        if self.hparams.greedy_weight and self.trainer.global_step < self.hparams.greedy_steps and "xs" in ret:
+        ssim_value = ssim(gt, prediction)
+        if w := weights["l2_weight"]:
+            loss = loss + w * l2_loss
+        if w := weights["ssim_weight"]:
+            loss = loss + w * (1 - ssim_value)
+        if (w := weights["greedy_weight"]) and "xs" in ret:
             gready_l2_loss = sum([torch.nn.functional.mse_loss(rss(x), gt) for x in ret["xs"][:-1]])
-            loss = loss + self.hparams.greedy_weight * gready_l2_loss
-        if self.hparams.l1_weight:
+            loss = loss + w * gready_l2_loss
+        if w := weights["l1_weight"]:
             l1_loss = torch.nn.functional.l1_loss(prediction, gt)
-            loss = loss + self.hparams.l1_weight * l1_loss
-        if self.hparams.max_weight:
+            loss = loss + w * l1_loss
+        if w := weights["max_weight"]:
             max_penalty = torch.nn.functional.mse_loss(gt.amax(dim=(-1, -2)), prediction.amax(dim=(-1, -2)))
-            loss = loss + self.hparams.max_weight * max_penalty
-        if self.hparams.charbonnier_weight:
+            loss = loss + w * max_penalty
+        if w := weights["charbonnier_weight"]:
             charbonnier_loss = (torch.nn.functional.mse_loss(prediction, gt, reduction="none") + 1e-3).sqrt().mean()
-            loss = loss + self.hparams.charbonnier_weight * charbonnier_loss
+            loss = loss + w * charbonnier_loss
 
         self.log("train_advantage", (rss_loss - l2_loss) / rss_loss, on_step=True, on_epoch=True, prog_bar=True, logger=True)
         self.log("train_loss", l2_loss, on_step=True, on_epoch=True, prog_bar=False, logger=True)
+        self.log("train_ssim", ssim_value, on_step=False, on_epoch=True, prog_bar=False, logger=True)
         self.log("rss_loss", rss_loss, on_step=True, on_epoch=True, prog_bar=False, logger=True)
 
         return loss
