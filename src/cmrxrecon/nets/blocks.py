@@ -76,19 +76,27 @@ class ResidualCBlock(nn.Module, EmbLayer):
         return ret
 
 
-class SequentialEmb(nn.Sequential, EmbLayer):
+class SequentialEmb(nn.Sequential, LatEmbLayer):
     def __init__(self, *args):
         self.need_embeding = {}
+        self.need_latent = {}
         super().__init__(*args)
 
     def add_module(self, name: str, module: torch.nn.Module | None):
         self.need_embeding[name] = isinstance(module, EmbLayer)
+        self.need_latent[name] = isinstance(module, LatLayer)
         super().add_module(name, module)
 
-    def forward(self, x, emb=None):
+    def forward(self, x, emb=None, hin=None, hout=False):
         for name, module in self._modules.items():
-            if self.need_embeding[name]:
+            need_emb = self.need_embeding[name]
+            need_h = self.need_latent[name]
+            if need_emb and need_h:
+                x = module(x, emb, hin, hout)
+            elif need_emb:
                 x = module(x, emb)
+            elif need_h:
+                x = module(x, hin, hout)
             else:
                 x = module(x)
         return x

@@ -494,6 +494,30 @@ class EmbLayer(ABC):
         ...
 
 
+class LatLayer(ABC):
+    """
+    Any module where forward() take a list of hidden vectors as second/third arguments
+    The last one in the second argument will be used as input, and to the third argument the output
+    will be appended.
+    """
+
+    @abstractmethod
+    def forward(self, x, hin, hout):
+        ...
+
+
+class LatEmbLayer(EmbLayer, LatLayer):
+    """
+    Any module where forward() take an embedding as second,
+    an input hidden vector list as third
+    and an output hidden vector list as forth argument.
+    """
+
+    @abstractmethod
+    def forward(self, x, emb, hin, hout):
+        ...
+
+
 class ScaleAndShift(nn.Module, EmbLayer):
     def __init__(self, emb_dim, filters, shift=True):
         super().__init__()
@@ -630,3 +654,71 @@ class CoordConvNd(nn.Module):
         x = torch.cat((x, coords), dim=1)
         x = self.conv(x)
         return x
+
+
+class LatentMix(nn.Module, LatLayer):
+    def __init__(self, dim: float, channels_input: int, channels_hidden: Optional[int] = None):
+        super().__init__()
+        if channels_hidden is None:
+            channels_hidden = channels_input
+        dim = math.ceil(dim)
+
+        self._channels_hidden = channels_hidden
+        self.h2x = ConvNd(dim)(channels_hidden, channels_input, 1, bias=False)
+        self.x2h = ConvNd(dim)(channels_input, channels_hidden, 1, bias=False)
+        self.h2h = ConvNd(dim)(channels_hidden, channels_hidden, 1)
+
+        nn.init.zeros_(self.h2h.bias)
+
+    def forward(self, x, hin: Optional[list[torch.Tensor]] = None, hout: Optional[list[torch.Tensor]] = None):
+        if hin:
+            h = hin[-1]
+        else:
+            h = torch.zeros(x.shape[0], self._channels_hidden, *x.shape[2:], dtype=x.dtype, device=x.device)
+        xnew = x + self.h2x(h)
+        hnew = h + nn.functional.relu(self.h2h(h), True) + self.x2h(x)
+        if hout is not None:
+            hout.append(hnew)
+        return xnew
+
+
+class LatentGU(nn.Module, LatLayer):
+    def __init__(self, dim: float, channels_input: int, channels_hidden: Optional[int] = None, film: bool = True):
+        super().__init__()
+        dim = math.ceil(dim)
+        if channels_hidden is None:
+            channels_hidden = channels_input
+        self._channels_hidden = channels_hidden
+
+        self.x2f = ConvNd(dim)(channels_input, channels_hidden, 1)
+        self.h2f = ConvNd(dim)(channels_hidden, channels_hidden, 1, bias=False)
+        self.x2c = ConvNd(dim)(channels_input, channels_hidden, 1)
+        self.hf2c = ConvNd(dim)(channels_hidden, channels_hidden, 1, bias=False)
+
+        self.h2b = ConvNd(dim)(channels_hidden, channels_input, 1, bias=False)
+        if film:
+            self.h2n = ConvNd(dim)(channels_hidden, channels_input, 1, bias=False)
+        else:
+            self.h2n = lambda x: 0.0
+
+        nn.init.orthogonal_(self.x2f.weight)
+        nn.init.orthogonal_(self.h2f.weight)
+        nn.init.orthogonal_(self.x2c.weight)
+        nn.init.orthogonal_(self.hf2c.weight)
+        nn.init.zeros_(self.x2f.bias)
+        nn.init.zeros_(self.x2c.bias)
+
+    def forward(self, x: torch.Tensor, hin: Optional[list[torch.Tensor]] = None, hout: Optional[list[torch.Tensor]] = None):
+        if hin:
+            h = hin[-1]
+        else:
+            h = torch.zeros(x.shape[0], self._channels_hidden, *x.shape[2:], dtype=x.dtype, device=x.device)
+        f = torch.sigmoid(self.x2f(x) + self.h2f(h))
+        c = torch.tanh(self.x2c(x) + self.hf2c(h * f))
+        h_new = h * (1 - f) + c * f
+        b = self.h2b(h_new)
+        n = self.h2n(h_new)
+        x_new = x * (n + 1) + b
+        if hout is not None:
+            hout.append(h_new)
+        return x_new

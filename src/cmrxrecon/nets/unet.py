@@ -6,7 +6,7 @@ from torch import nn
 from .blocks import *
 
 
-class UnetLayer(nn.Module, EmbLayer):
+class UnetLayer(nn.Module, LatEmbLayer):
     """
     One Layer in a Unet-based Net
     X--> Encoder -------------- Skip--------------- Decoder --> X"
@@ -14,21 +14,28 @@ class UnetLayer(nn.Module, EmbLayer):
 
     """
 
-    def __init__(self, encoder, downsampling, sublayer, upsampling, decoder, skip=nn.Identity()):
+    def __init__(self, encoder, downsampling, sublayer, upsampling, decoder, skip=None):
         super().__init__()
         self.encoder = encoder
-        self.downpath = SequentialEmb(downsampling, sublayer, upsampling)
-        self.skip = skip
+        self.skip = nn.Identity() if skip is None else skip
         self.decoder = decoder
-        self.emb_encoder: bool = isinstance(encoder, EmbLayer)
-        self.emb_skip: bool = isinstance(skip, EmbLayer)
-        self.emb_decoder: bool = isinstance(decoder, EmbLayer)
+        self.downpath = SequentialEmb(downsampling, sublayer, upsampling)
 
-    def forward(self, x, emb):
-        x = self.encoder(x, emb) if self.emb_encoder else self.encoder(x)
-        xdown = self.downpath(x, emb)
-        skip = self.skip(x, emb) if self.emb_skip else self.skip(x)
-        x = self.decoder((skip, xdown), emb) if self.emb_decoder else self.decoder((skip, xdown))
+    def forward(self, x, emb, hin=None, hout=None):
+        def call(module, x):
+            if isinstance(module, LatEmbLayer):
+                return module(x, emb, hin, hout)
+            elif isinstance(module, EmbLayer):
+                return module(x, emb)
+            elif isinstance(module, LatLayer):
+                return module(x, hin, hout)
+            else:
+                return module(x)
+
+        x = call(self.encoder, x)
+        xdown = call(self.downpath, x)
+        skip = call(self.skip, x)
+        x = call(self.decoder, (skip, xdown))
         return x
 
 
@@ -63,6 +70,7 @@ class Unet(nn.Module):
         skip_add: bool = False,
         downsample_dimensions: Optional[Tuple[Tuple[int, ...], ...]] = None,
         coordconv: Union[Literal["first"], bool, Tuple[Union[Tuple[bool, ...], bool]]] = False,
+        latents=False,
     ):
         """
         A mostly vanilla UNet with linear final activation
@@ -91,6 +99,7 @@ class Unet(nn.Module):
         skip_add: Do an add of the skipped connection to the upsampled instead of a concat
         downsample_dimensions: Dimensions to downsample. None: 2D: (-1,-2), 3D: (-1,-2,-3), 2.5D: (-1,-2)
         coordconv: use coordconv as first conv. either bool or tuple[tuple[bool,...]|bool,tuple[bool,...]|bool] for each block of encoder/decoder
+        latents: input / output hidden state used in skip connection mixing
         """
         super().__init__()
 
@@ -132,6 +141,33 @@ class Unet(nn.Module):
         fdim = dim
         dim = int(math.ceil(dim))
         half_dim = math.isclose(fdim - math.floor(fdim), 0.5)
+
+        if isinstance(latents, (bool, int, str)):
+            latents = (latents,) * layer
+        else:
+            latents = latents + (False,) * (layer - len(latents) + 1)
+        self.latent = False
+
+        def latentlayer(lat, ch_in):
+            if isinstance(lat, str):
+                n = int(lat.split("_")[1]) if "_" in lat else ch_in
+                if "mix" in lat.lower():
+                    self.latent = True
+                    return LatentMix(dim, ch_in, n)
+                elif "film" in lat.lower():
+                    self.latent = True
+                    return LatentGU(dim, ch_in, n, film=True)
+                elif "gu" in lat.lower():
+                    self.latent = True
+                    return LatentGU(dim, ch_in, n, film=False)
+            elif isinstance(lat, bool) and lat:
+                self.latent = True
+                return LatentMix(dim, ch_in, ch_in)
+            elif isinstance(lat, int) and lat:
+                self.latent = True
+                return LatentMix(dim, ch_in, lat)
+
+            return None
 
         if downsample_dimensions is None:
             downsample_dimensions = (tuple(range(-dim + half_dim, 0)),)
@@ -209,7 +245,11 @@ class Unet(nn.Module):
             final_norm=final_norm,
         )
         join = Concat("crop" if padding_mode == "none" else "pad")
-        features_enc = [(channels_in,) + (filters,) * (conv_per_enc_block - 1) + (int(filters * feature_growth(0)) & ~1,)]
+        if change_filters_last:
+            features_enc = [(channels_in,) + (filters,) * (conv_per_enc_block - 1) + (int(filters * feature_growth(0)) & ~1,)]
+        else:
+            features_enc = [(channels_in,) + (filters,) + (conv_per_enc_block - 1) * (int(filters * feature_growth(0)) & ~1,)]
+
         last = features_enc[-1][-1]
         if skip_add:
             factor = 0
@@ -218,7 +258,9 @@ class Unet(nn.Module):
             factor = 1
         else:
             factor = feature_growth(1)
+
         features_dec = [(last + int(factor * last),) + (last,) * conv_per_dec_block]
+
         for depth in range(1, layer + 1):
             new = int(feature_growth(depth) * last) & ~1
             if change_filters_last:
@@ -230,21 +272,25 @@ class Unet(nn.Module):
                 factor = feature_growth(depth + 1)
             features_dec.append((last + int(factor * last) & ~1,) + (last,) * conv_per_dec_block)
         net = block(features_enc[-1], coordconv=coordconv[0][-1])
-        for fenc, fdec, fup, fdown, downsampling, upsampling, coordconv_enc, coordconv_dec in zip(
+        if (latent := latentlayer(latents[-1], features_enc[-1][-1])) is not None:
+            net = SequentialEmb(net, latent)
+        for fenc, fdec, fup, fdown, downsampling, upsampling, coordconv_enc, coordconv_dec, lat in zip(
             features_enc[-2::-1],
             features_dec[-2::-1],
             features_enc[-1::-1],
             features_enc[-3::-1] + [[1]],
-            downsamplings[::-1],
-            upsamplings[::-1],
+            downsamplings[-1::-1],
+            upsamplings[-1::-1],
             coordconv[0][-2::-1],
             coordconv[1][-1::-1],
+            latents[-2::-1],
         ):
             decoder = SequentialEmb(join, block(fdec, groups=groups_dec, emb_dim=emb_dim, coordconv=coordconv_dec))
             encoder = block(fenc, groups=groups_enc, emb_dim=emb_dim, coordconv=coordconv_enc)
             up = upsampling(fup[-1], fdec[0] if skip_add else fdec[0] - fenc[-1])
             down = downsampling(fenc[-1], fup[0])
-            net = UnetLayer(encoder, down, net, up, decoder)
+            lat = latentlayer(lat, fenc[-1])
+            net = UnetLayer(encoder, down, net, up, decoder, skip=lat)
         self.net = net
 
         self.last = CBlock(
@@ -286,11 +332,14 @@ class Unet(nn.Module):
     def _init_weights(self):
         self.last[-1].bias.zero_()
 
-    def forward(self, x, emb=None):
+    def forward(self, x, emb=None, hin=None):
         if self.emb_dim > 0 and emb is None:
             emb = torch.zeros(x.shape[0], self.emb_dim, dtype=x.dtype, device=x.device)
-        ret = self.net(x, emb)
+        hout = [] if self.latent else None
+        ret = self.net(x, emb, hin, hout=hout)
         ret = self.last(ret)
         if self.residual is not None:
             ret = ret + self.residual(x)
+        if self.latent:
+            ret = (ret, hout)
         return ret
