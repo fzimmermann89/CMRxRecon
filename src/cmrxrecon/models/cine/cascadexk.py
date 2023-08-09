@@ -45,27 +45,35 @@ class CNNWrapper(torch.nn.Module):
                 x_rss_c = rss(xc)
             x_rss_c = einops.rearrange(x_rss_c, "b z t x y -> (b z) t x y").unsqueeze(1)
             net_input = torch.cat((net_input, x_rss_c), 1)
-        x_net = self.net(net_input, *args, **kwargs)
+        x_net, h = self.net(net_input, *args, **kwargs)
         x_net = einops.rearrange(x_net, "(b z) (r c) t x y -> b c z t x y r", b=len(x), r=2).contiguous()
         x_net = torch.view_as_complex(x_net)
         x_net = uncrop(x_net, x.shape, crops)
-        return x + x_net
+        return x + x_net, h
 
 
 class KCNNWrapper(torch.nn.Module):
-    def __init__(self, net):
+    def __init__(self, net, input_k0: bool = True):
+        super().__init__()
         self.net = net
+        self.input_k0 = input_k0
 
-    def forward(self, k, *args, k0=None, **kwargs):
-        if k0 is not None:
-            k_netinput = torch.concat((k, k0), 1)
+    def prepare_k0(self, k0):
+        if self.input_k0:
+            return torch.fft.fftshift(torch.fft.ifft(k0, dim=-1, norm="ortho"), dim=-2)
+
+    def forward(self, k, *args, prepared_k0=None, **kwargs):
+        if prepared_k0 is not None:
+            k_netinput = torch.concat((torch.fft.fftshift(k, dim=-2), prepared_k0), 1)
         else:
-            k_netinput = k
-        k_netinput = einops.rearange(torch.view_as_real(k_netinput), "b c z t x y r-> (b z t) (r c) x y")
-        k_net = self.net(k_netinput, *args, **kwargs)
-        k_net = einops.rearrange(k_net, "(b z t) (r c) t x y -> b c z t x y r", b=k.shape[0], z=k.shape[1], r=2).contiguous()
+            k_netinput = torch.fft.fftshift(k, dim=-2)
+        k_netinput = einops.rearrange(torch.view_as_real(k_netinput), "b c z t x y r-> (b z t) (r c) x y")
+        k_net, h = self.net(k_netinput, *args, **kwargs)
+        k_net = torch.fft.fftshift(
+            einops.rearrange(k_net, "(b z t) (r c) x y -> b c z t x y r", b=k.shape[0], z=k.shape[2], r=2), dim=-3
+        )
         k_net = torch.view_as_complex(k_net)
-        return k + k_net
+        return k + k_net, h
 
 
 class CascadeNet(torch.nn.Module):
@@ -79,12 +87,12 @@ class CascadeNet(torch.nn.Module):
         T: int = 2,
         embed_dim=192,
         crop_threshold: float = 0.005,
-        lambda_bias=1e-6,
+        lambda_init=1e-6,
         **kwargs,
     ):
         super().__init__()
         self.input_rss = input_rss
-        embed_dim: int = 128
+        embed_dim: int = 192
         if unet_args is None:
             unet_args = dict(
                 dim=2,
@@ -109,11 +117,14 @@ class CascadeNet(torch.nn.Module):
         with torch.no_grad():
             net.last[0].bias.zero_()
             knet.last[0].bias.zero_()
+            knet.last[0].weight *= 0.01
 
         self.net = CNNWrapper(net, include_rss=input_rss, crop_threshold=crop_threshold)
-        self.knet = KCNNWrapper(net)
+        self.knet = KCNNWrapper(knet, input_k0=input_k0)
 
-        self.dc = torch.jit.script(MultiCoilDCLayer(Nc, lambda_bias=lambda_bias, embed_dim=embed_dim // 3))
+        self.dc = torch.jit.script(
+            MultiCoilDCLayer(Nc, lambda_init=lambda_init, embed_dim=embed_dim // 3, input_nn_k=(True, False))
+        )
 
         self.embed_augment_channels = 6
         self.embed_axis_channels = 2
@@ -128,6 +139,7 @@ class CascadeNet(torch.nn.Module):
         )
 
         self.embed_net = torch.compile(MLP([embed_input_channels, embed_dim, embed_dim]))
+        self.input_k0 = input_k0
 
     def forward(self, k: torch.Tensor, mask: torch.Tensor, **other) -> dict:
         # get all the conditioning information or defaults
@@ -141,28 +153,27 @@ class CascadeNet(torch.nn.Module):
         x0 = torch.fft.ifftn(k, dim=(-2, -1), norm="ortho")
         x_rss = rss(x0)
 
-        x = [x0]
+        xi = x0
         hk = None
         hx = None
+        xs = []
+        prepared_k0 = self.knet.prepare_k0(k)
         for t in range(self.T):
             iteration_info = self.embed_iter_map(t * torch.ones(k.shape[0], 1, device=k.device))
             z = self.embed_net(torch.cat((static_info, iteration_info), dim=-1))
             zlambda, znet, zknet = torch.chunk(z, 3, dim=1)
-            x_net, hx = self.net(x[-1], emb=znet, hin=hx, x_rss=None if t else x_rss)
-            k_x_net = torch.fft.ifft(x_net, dim=-1, norm="ortho")
-            k_net, hk = self.knet(k_x_net, k0=k, emb=zknet, hin=hk)
-            x_dc = self.dc(k, x_net, mask, zlambda)
-            x.append(x_net)
-            x.append(x_dc)
+            x_net, hx = self.net(xi, emb=znet, hin=hx, x_rss=None if t else x_rss)
+            k_x_net = torch.fft.fft(x_net, dim=-2, norm="ortho")  # k space along undersampled dim
+            k_net, hk = self.knet(k_x_net, prepared_k0=prepared_k0, emb=zknet, hin=hk)
+            x_dc = self.dc(k, k_net, mask, zlambda)
+            xi = x_dc
+            xs.append(x_net)
 
-        pred = rss(x[-1])
-        return dict(prediction=pred, rss=x_rss, xs=x)
-
-    def load_state_dict(self, state_dict: Mapping[str, Any], strict: bool = True):
-        return super().load_state_dict(state_dict, strict)
+        pred = rss(xi)
+        return dict(prediction=pred, rss=x_rss, xs=xs)
 
 
-class Cascade(CineModel):
+class CascadeXK(CineModel):
     def __init__(
         self,
         input_rss=True,
@@ -172,7 +183,7 @@ class Cascade(CineModel):
         schedule=True,
         Nc: int = 10,
         T: int = 3,
-        embed_dim=128,
+        embed_dim=192,
         crop_threshold: float = 0.005,
         phase2_pct: float = 0.5,
         l2_weight: tuple[float, float] | float = 0.6,
@@ -181,7 +192,7 @@ class Cascade(CineModel):
         l1_weight: tuple[float, float] | float = 0.0,
         charbonnier_weight: tuple[float, float] | float = 0.0,
         max_weight: tuple[float, float] | float = 0.0,
-        lambda_bias: float = 1e-6,
+        lambda_init: float = 0.5,
         **kwargs,
     ):
         super().__init__()
@@ -192,9 +203,7 @@ class Cascade(CineModel):
             filters=48,
             padding_mode="zeros",
             residual="inner",
-            # residual=False,
-            # norm=False,
-            latents=("film_8", "film_16", "film_16", "film_16"),
+            latents=(False, "film_16", "film_16", "film_16"),
             norm="group16",
             feature_growth=(1, 2, 1.5, 1.34, 1, 1),
             activation="leakyrelu",
@@ -204,10 +213,11 @@ class Cascade(CineModel):
         )
 
         k_unet_args = dict(
+            dim=2,
             filters=64,
             layer=1,
             feature_growth=(1.0, 1.5, 1.0),
-            latents=("film_16", "film_16"),
+            latents=(False, "film_16"),
             conv_per_enc_block=3,
             conv_per_dec_block=3,
             downsample_dimensions=((-2,),),
@@ -234,7 +244,7 @@ class Cascade(CineModel):
             T=T,
             embed_dim=embed_dim,
             crop_threshold=crop_threshold,
-            lambda_bias=lambda_bias,
+            lambda_init=lambda_init,
             **kwargs,
         )
         self.EMANorm = EMA(alpha=0.9, max_iter=100)

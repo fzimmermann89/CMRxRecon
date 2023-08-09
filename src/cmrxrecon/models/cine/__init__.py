@@ -8,4 +8,5 @@ from .csm_free_pdnet import CSMFreeMultiCoilPDNetwork
 from .csm_free_pdnet import CSMFreeMultiCoilDataConsPDNetwork
 from .rss import RSS
 from .cascade import Cascade
+from .cascadexk import CascadeXK
 from .csm_free_recon import CSMFreeReconDeluxeNN
