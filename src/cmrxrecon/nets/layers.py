@@ -672,7 +672,7 @@ class LatentMix(nn.Module, LatLayer):
 
     def forward(self, x, hin: Optional[list[torch.Tensor]] = None, hout: Optional[list[torch.Tensor]] = None):
         if hin:
-            h = hin[-1]
+            h = hin.pop(0)
         else:
             h = torch.zeros(x.shape[0], self._channels_hidden, *x.shape[2:], dtype=x.dtype, device=x.device)
         xnew = x + self.h2x(h)
@@ -710,7 +710,7 @@ class LatentGU(nn.Module, LatLayer):
 
     def forward(self, x: torch.Tensor, hin: Optional[list[torch.Tensor]] = None, hout: Optional[list[torch.Tensor]] = None):
         if hin:
-            h = hin[-1]
+            h = hin.pop(0)
         else:
             h = torch.zeros(x.shape[0], self._channels_hidden, *x.shape[2:], dtype=x.dtype, device=x.device)
         f = torch.sigmoid(self.x2f(x) + self.h2f(h))
