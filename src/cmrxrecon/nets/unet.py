@@ -18,8 +18,8 @@ class UnetLayer(nn.Module, LatEmbLayer):
         super().__init__()
         self.encoder = encoder
         self.skip = nn.Identity() if skip is None else skip
-        self.decoder = decoder
         self.downpath = SequentialEmb(downsampling, sublayer, upsampling)
+        self.decoder = decoder
 
     def forward(self, x, emb, hin=None, hout=None):
         def call(module, x):
@@ -71,6 +71,7 @@ class Unet(nn.Module):
         downsample_dimensions: Optional[Tuple[Tuple[int, ...], ...]] = None,
         coordconv: Union[Literal["first"], bool, Tuple[Union[Tuple[bool, ...], bool]]] = False,
         latents=False,
+        reszero=True,
     ):
         """
         A mostly vanilla UNet with linear final activation
@@ -100,6 +101,7 @@ class Unet(nn.Module):
         downsample_dimensions: Dimensions to downsample. None: 2D: (-1,-2), 3D: (-1,-2,-3), 2.5D: (-1,-2)
         coordconv: use coordconv as first conv. either bool or tuple[tuple[bool,...]|bool,tuple[bool,...]|bool] for each block of encoder/decoder
         latents: input / output hidden state used in skip connection mixing
+        reszero: use resZero initialisation in inner residual blocks.
         """
         super().__init__()
 
@@ -243,6 +245,7 @@ class Unet(nn.Module):
             padding_mode="zeros" if padding_mode == "none" else padding_mode,
             split_dim=half_dim,
             final_norm=final_norm,
+            resZero=reszero,
         )
         join = Concat("crop" if padding_mode == "none" else "pad")
         if change_filters_last:
