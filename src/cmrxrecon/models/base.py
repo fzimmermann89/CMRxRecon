@@ -3,6 +3,7 @@ import torch
 import pytorch_lightning as pl
 from neptune.new.types import File as neptuneFile
 from pytorch_lightning.loggers.neptune import NeptuneLogger
+from cmrxrecon.models.utils.ssim import ssim
 
 
 class TrainingMixin_xrss(ABC):
@@ -25,8 +26,12 @@ class ValidationMixin(ABC):
         prediction, rss = ret["prediction"], ret["rss"]
         loss = torch.nn.functional.mse_loss(prediction, gt)
         rss_loss = torch.nn.functional.mse_loss(rss, gt)
+        ssim_value = ssim(gt / gt.max(), prediction / prediction.max())
+
         self.log("val_advantage", (rss_loss - loss) / rss_loss, on_step=True, on_epoch=True, prog_bar=True, logger=True)
         self.log("val_loss", loss, on_step=True, on_epoch=True, prog_bar=False, logger=True)
+        self.log("val_ssim", ssim_value, on_step=False, on_epoch=True, prog_bar=True, logger=True)
+
         if batch_idx == 0:
             for logger in self.loggers:
                 if isinstance(logger, NeptuneLogger):
