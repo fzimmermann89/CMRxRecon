@@ -27,9 +27,10 @@ class CineData(pl.LightningDataModule):
         augments: bool = False,
         singleslice: bool = True,
         center_lines: int = 24,
-        random_acceleration: bool = True,
+        random_acceleration: bool | float = True,
         acceleration: tuple[int, ...] = (4, 8, 10),
         return_csm: bool = False,
+        return_kfull: bool = False,
         test_data_dir: Optional[str] = "files/MultiCoil/Cine/ValidationSet",
     ):
         """
@@ -63,12 +64,12 @@ class CineData(pl.LightningDataModule):
         self.batch_size = batch_size
         self.singleslice = singleslice
         self.return_csm = return_csm
+        self.return_kfull = return_kfull
         self.kwargs = dict(
             center_lines=center_lines,
-            random_acceleration=random_acceleration,
-            acceleration=acceleration,
+            singleslice=singleslice,
         )
-
+        unique_accelerations = sorted(set(acceleration))
         if data_dir is not None and data_dir != "":
             different_sizes = sum([list((Path(self.data_dir) / ax).glob("*_*_*")) for ax in self.axis], [])
 
@@ -91,19 +92,27 @@ class CineData(pl.LightningDataModule):
                 del paths[val_size]
 
             datasets = [
-                CineDataDS(path, singleslice=self.singleslice, return_csm=return_csm, augments=augments, **self.kwargs)
+                CineDataDS(
+                    path,
+                    return_csm=return_csm,
+                    return_kfull=return_kfull,
+                    random_acceleration=random_acceleration,
+                    augments=augments,
+                    acceleration=acceleration,
+                    **self.kwargs,
+                )
                 for path in paths.values()
             ]
 
             self.train_multidatasets = MultiDataSets(datasets)
-            self.val_dataset = CineDataDS(val_ds, singleslice=self.singleslice, return_csm=return_csm, **self.kwargs)
+            self.val_dataset = CineDataDS(
+                val_ds, return_csm=return_csm, acceleration=unique_accelerations, random_acceleration=False, **self.kwargs
+            )
         else:
             self.train_multidatasets = None
             self.val_dataset = None
         if test_data_dir is not None and test_data_dir != "":
-            self.test_dataset = CineTestDataDS(
-                test_data_dir, axis=self.axis, singleslice=self.singleslice, return_csm=self.return_csm
-            )
+            self.test_dataset = CineTestDataDS(test_data_dir, axis=self.axis, return_csm=self.return_csm)
 
     def train_dataloader(self):
         if self.train_multidatasets is None:

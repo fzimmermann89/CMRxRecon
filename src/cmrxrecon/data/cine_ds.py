@@ -4,9 +4,9 @@ import h5py
 import numpy as np
 import torch
 from torch.utils.data import Dataset
-
+from typing import Any, Callable
 from cmrxrecon.models.utils.csm import sigpy_espirit
-
+from cmrxrecon.models.utils import rss
 from .utils import create_mask
 from .augments import CineAugment
 
@@ -17,10 +17,11 @@ class CineDataDS(Dataset):
         path,
         acceleration: tuple[int,] = (4,),
         singleslice: bool = True,
-        random_acceleration: bool = False,
+        random_acceleration: bool | float = False,
         center_lines: int = 24,
         return_csm: bool = False,
         augments: bool = False,
+        return_kfull: bool = False,
     ):
         """
         A Cine Dataset
@@ -31,6 +32,7 @@ class CineDataDS(Dataset):
         center_lines: ACS lines
         return_csm: return coil sensitivity maps
         augments: augment data
+        return_kfull: return fully sampled k space data
 
         A sample consists of a dict with
             - k: undersampled k-data (shifted, k=0 is on the corner)
@@ -52,10 +54,11 @@ class CineDataDS(Dataset):
         self.random_acceleration = random_acceleration
         self.center_lines = center_lines
         self.return_csm = return_csm
+        self.return_kfull = return_kfull
 
         if augments:
-            self.augments = CineAugment(
-                p_flip_spatial=0.2,
+            self.augments: Callable = CineAugment(
+                p_flip_spatial=0.4,
                 p_flip_temporal=0.2,
                 p_shuffle_coils=0.2,
                 p_phase=0.2,
@@ -75,7 +78,7 @@ class CineDataDS(Dataset):
             raise IndexError
 
         acceleration = self.acceleration[int(torch.randint(len(self.acceleration), size=(1,)))]
-        if self.random_acceleration:
+        if self.random_acceleration and torch.rand(1) < self.random_acceleration:
             offset = int(torch.randint(acceleration, size=(1,)))
         else:
             offset = 0
@@ -92,17 +95,19 @@ class CineDataDS(Dataset):
         with h5py.File(self.filenames[filenr], "r") as file:
             lines = file["k"].shape[-5]
             mask = create_mask(lines, self.center_lines, acceleration, offset)
-
-            k_data = file["k"][selection, mask]
-            gt = file["sos"][selection]
+            if self.return_kfull:
+                k = torch.as_tensor(np.array(file["k"][selection]))
+                gt = None
+            else:
+                k_tmp = torch.as_tensor(np.array(file["k"][selection, mask]))
+                k = torch.zeros(k_tmp.shape[0], lines, *k_tmp.shape[2:], dtype=k_tmp.dtype)
+                k[:, mask, :, :, :] = k_tmp
+                gt = file["sos"][selection]
             if self.return_csm:
                 csm = file["csm"][selection]
 
-        k_data = torch.view_as_complex(torch.as_tensor(k_data)).permute((3, 0, 2, 1, 4))
-        k = torch.zeros(*k_data.shape[:3], lines, k_data.shape[-1], dtype=torch.complex64)
-        k[:, :, :, mask, :] = k_data
+        k = torch.view_as_complex(k).permute((3, 0, 2, 1, 4))
         mask = torch.as_tensor(mask[None, None, :, None])
-        gt = torch.as_tensor(gt)
         ret = {
             "k": k,
             "mask": mask,
@@ -115,6 +120,10 @@ class CineDataDS(Dataset):
             csm = torch.view_as_complex(torch.as_tensor(csm)).swapaxes(0, 1) if self.return_csm else None
             ret["csm"] = csm
         ret = self.augments(ret)
+        if self.return_kfull:
+            ret["kfull"] = ret["k"]
+            ret["k"] = ret["k"] * mask
+            ret["gt"] = rss(torch.fft.ifft2(ret["kfull"], norm="ortho"), 0)
         return ret
 
 
@@ -143,7 +152,7 @@ class CineTestDataDS(Dataset):
         """
         if isinstance(path, (str, Path)):
             path = (Path(path),)
-        if isinstance(path, str):
+        if isinstance(axis, str):
             axis = (axis,)
         self.filenames = sum([list(Path(p).rglob(f"cine_{ax}.mat")) for p in path for ax in axis], [])
         self.shapes = [self._getdata(fn).shape for fn in self.filenames]
@@ -177,7 +186,7 @@ class CineTestDataDS(Dataset):
         else:
             return len(self.filenames)
 
-    def __getitem__(self, idx) -> dict[str, torch.Tensor]:
+    def __getitem__(self, idx) -> dict[str, Any]:
         if idx >= len(self):
             raise IndexError
 
