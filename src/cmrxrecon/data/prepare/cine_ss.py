@@ -7,8 +7,9 @@ from collections import defaultdict
 import numpy as np
 from tqdm import tqdm
 
-val_path = Path("files/MultiCoil/Cine/ValidationSet")
-out_path = Path("files/MultiCoil/Cine/ValidationSelfSupervised")
+
+val_path = Path("../../../../../files/MultiCoil/Cine/ValidationSet")
+out_path = Path("../../../../../files/MultiCoil/Cine/ValidationSelfSupervised")
 
 
 def shift(data: np.ndarray) -> np.ndarray:
@@ -37,7 +38,7 @@ for fn in filenames:
 
 for sample in tqdm(list(ordered.values())):
     names = sorted(sample)
-
+    axis = names[0].stem.split("_")[-1]
     img = None
     for fn in names:
         if "AccFactor08" in str(fn):
@@ -63,3 +64,5 @@ for sample in tqdm(list(ordered.values())):
     with h5py.File(outfilename, mode="w") as outfile:
         outfile.create_dataset("k", k.shape, dtype=np.float32, data=k)
         outfile.create_dataset("mask", mask.shape, dtype=bool, data=mask)
+
+# %%
