@@ -1,6 +1,7 @@
 from typing import Any, Mapping
+from matplotlib.pyplot import xscale
 import torch
-import einops
+from einops import rearrange
 from cmrxrecon.nets.unet import Unet
 from cmrxrecon.nets.mlp import MLP
 from typing import *
@@ -13,6 +14,8 @@ from cmrxrecon.models.utils.mapper import Mapper
 from cmrxrecon.models.utils.multicoildc import MultiCoilDCLayer
 import gc
 from cmrxrecon.models.utils.ssim import ssim
+from torch import view_as_real as c2r, view_as_complex as r2c
+from torch.nn import functional as F
 
 
 class CNNWrapper(torch.nn.Module):
@@ -39,22 +42,30 @@ class CNNWrapper(torch.nn.Module):
             xc = x
             x_rss_c = x_rss
             crops = None
-        net_input = einops.rearrange(torch.view_as_real(xc), "b c z t x y r -> (b z) (r c) t x y")
+        net_input = rearrange(c2r(xc), "b c z t x y r -> (b z) (r c) t x y")
         if self.include_rss:
             if x_rss is None:
                 x_rss_c = rss(xc)
-            x_rss_c = einops.rearrange(x_rss_c, "b z t x y -> (b z) t x y").unsqueeze(1)
+            x_rss_c = rearrange(x_rss_c, "b z t x y -> (b z) t x y").unsqueeze(1)
             net_input = torch.cat((net_input, x_rss_c), 1)
         x_net = self.net(net_input, *args)
-        x_net = einops.rearrange(x_net, "(b z) (r c) t x y -> b c z t x y r", b=len(x), r=2).contiguous()
-        x_net = torch.view_as_complex(x_net)
+        x_net = rearrange(x_net, "(b z) (r c) t x y -> b c z t x y r", b=len(x), r=2).contiguous()
+        x_net = r2c(x_net)
         x_net = uncrop(x_net, x.shape, crops)
         return x + x_net
 
 
 class CascadeNet(torch.nn.Module):
     def __init__(
-        self, unet_args=None, input_rss=True, Nc: int = 10, T: int = 2, embed_dim=128, crop_threshold: float = 0.005, **kwargs
+        self,
+        unet_args=None,
+        input_rss=True,
+        Nc: int = 10,
+        T: int = 2,
+        embed_dim=128,
+        crop_threshold: float = 0.005,
+        lambda_init: float = 1.0,
+        **kwargs,
     ):
         super().__init__()
         self.input_rss = input_rss
@@ -75,7 +86,7 @@ class CascadeNet(torch.nn.Module):
 
         self.net = CNNWrapper(net, include_rss=input_rss, crop_threshold=crop_threshold)
 
-        self.dc = torch.jit.script(MultiCoilDCLayer(Nc, embed_dim=embed_dim // 2))
+        self.dc = torch.jit.script(MultiCoilDCLayer(Nc, lambda_init=lambda_init, embed_dim=embed_dim // 2))
 
         self.embed_augment_channels = 6
         self.embed_axis_channels = 2
@@ -114,10 +125,7 @@ class CascadeNet(torch.nn.Module):
             x.append(x_dc)
 
         pred = rss(x[-1])
-        return dict(prediction=pred, rss=x_rss, xs=x)
-
-    def load_state_dict(self, state_dict: Mapping[str, Any], strict: bool = True):
-        return super().load_state_dict(state_dict, strict)
+        return dict(prediction=pred, rss=x_rss, xs=x, x=x[-1])
 
 
 class Cascade(CineModel):
@@ -138,6 +146,11 @@ class Cascade(CineModel):
         l1_weight: tuple[float, float] | float = 0.0,
         charbonnier_weight: tuple[float, float] | float = 0.0,
         max_weight: tuple[float, float] | float = 0.0,
+        l1_coilwise_weight: tuple[float, float] | float = 0.0,
+        l2_coilwise_weight: tuple[float, float] | float = 0.0,
+        greedy_coilwise_weight: tuple[float, float] | float = 0.0,
+        l2_k_weight: tuple[float, float] | float = 0.0,
+        lambda_init: float = 1.0,
         **kwargs,
     ):
         super().__init__()
@@ -168,6 +181,7 @@ class Cascade(CineModel):
             T=T,
             embed_dim=embed_dim,
             crop_threshold=crop_threshold,
+            lambda_init=lambda_init,
             **kwargs,
         )
         self.EMANorm = EMA(alpha=0.9, max_iter=100)
@@ -177,13 +191,23 @@ class Cascade(CineModel):
         ret = self.net(k, mask, **other)
         if not self.training:
             unnorm = 1 / self.EMANorm.ema_unbiased
-            ret["prediction"] = ret["prediction"] * unnorm
-            ret["rss"] = ret["rss"] * unnorm
-            ret["xs"] = [x * unnorm for x in ret["xs"]]
+            ret = dict(prediction=ret["prediction"] * unnorm, rss=ret["rss"] * unnorm)
         return ret
 
     def get_weights(self):
-        keys = ["l2_weight", "ssim_weight", "greedy_weight", "l1_weight", "charbonnier_weight", "max_weight"]
+        keys = [
+            "l2_weight",
+            "ssim_weight",
+            "greedy_weight",
+            "l1_weight",
+            "charbonnier_weight",
+            "max_weight",
+            "l1_coilwise_weight",
+            "l2_coilwise_weight",
+            "greedy_coilwise_weight",
+            "l2_k_weight",
+        ]
+
         ret = {}
         for k in keys:
             v = self.hparams[k]
@@ -203,25 +227,44 @@ class Cascade(CineModel):
 
         weights = self.get_weights()
         loss = 0.0
-        rss_loss = torch.nn.functional.mse_loss(x_rss, gt)
-        l2_loss = torch.nn.functional.mse_loss(prediction, gt)
+        rss_loss = F.mse_loss(x_rss, gt)
+        l2_loss = F.mse_loss(prediction, gt)
         ssim_value = ssim(gt, prediction)
         if w := weights["l2_weight"]:
             loss = loss + w * l2_loss
         if w := weights["ssim_weight"]:
             loss = loss + w * (1 - ssim_value)
         if (w := weights["greedy_weight"]) and "xs" in ret:
-            gready_l2_loss = sum([torch.nn.functional.mse_loss(rss(x), gt) for x in ret["xs"][:-1]])
+            gready_l2_loss = sum([F.mse_loss(rss(x), gt) for x in ret["xs"][:-1]])
             loss = loss + w * gready_l2_loss
         if w := weights["l1_weight"]:
-            l1_loss = torch.nn.functional.l1_loss(prediction, gt)
+            l1_loss = F.l1_loss(prediction, gt)
             loss = loss + w * l1_loss
         if w := weights["max_weight"]:
-            max_penalty = torch.nn.functional.mse_loss(gt.amax(dim=(-1, -2)), prediction.amax(dim=(-1, -2)))
+            max_penalty = F.mse_loss(gt.amax(dim=(-1, -2)), prediction.amax(dim=(-1, -2)))
             loss = loss + w * max_penalty
         if w := weights["charbonnier_weight"]:
-            charbonnier_loss = (torch.nn.functional.mse_loss(prediction, gt, reduction="none") + 1e-3).sqrt().mean()
+            charbonnier_loss = (F.mse_loss(prediction, gt, reduction="none") + 1e-3).sqrt().mean()
             loss = loss + w * charbonnier_loss
+        if ("kfull" in batch) and (
+            (l1w := weights["l1_coilwise_weight"])
+            or (l2w := weights["l2_coilwise_weight"])
+            or (l2gw := weights["greedy_coilwise_weight"])
+            or (kw := weights["l2_k_weight"])
+        ):
+            kfull = batch.pop("kfull") * norm
+            if l1w or l2w or l2gw:
+                gt_coil_wise = c2r(torch.fft.ifft2(kfull, norm="ortho"))
+                if l1w and ("x" in ret):
+                    loss = loss + l1w * F.l1_loss(c2r(ret["x"]), gt_coil_wise)
+                if l2w and ("x" in ret):
+                    loss = loss + l2w * F.mse_loss(c2r(ret["x"]), gt_coil_wise)
+                if l2gw and ("xs" in ret):
+                    greedy_x_cw = sum([F.mse_loss(c2r(x), gt_coil_wise) for x in ret["xs"]])
+                    loss = loss + l2gw * greedy_x_cw
+            if kw:
+                k_loss = F.mse_loss(c2r(torch.fft.fft2(ret["x"], norm="ortho")), c2r(kfull))
+                loss = loss + kw * k_loss
 
         self.log("train_advantage", (rss_loss - l2_loss) / rss_loss, on_step=True, on_epoch=True, prog_bar=True, logger=True)
         self.log("train_loss", l2_loss, on_step=True, on_epoch=True, prog_bar=False, logger=True)
