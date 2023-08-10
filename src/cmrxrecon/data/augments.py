@@ -4,6 +4,10 @@ import torch
 from torch import nn
 
 
+def flip(data, dims):
+    return torch.roll(torch.flip(data, dims), (1,) * len(dims), dims)
+
+
 class CineAugment:
     def __init__(
         self,
@@ -25,45 +29,56 @@ class CineAugment:
 
     def __call__(self, sample):
         k = sample["k"]
-        gt = sample["gt"]
+        gt = sample.get("gt", None)
         csm = sample.get("csm", None)
         flippedx, flippedy, flippedz, flippedt = 0, 0, 0, 0
         shuffled = 0
         phase = 0.0
+
+        if gt is not None:
+            gt = torch.as_tensor(gt)
+        if csm is not None:
+            csm = torch.as_tensor(csm)
+
         if torch.rand(1) < self.p_flip_spatial:
             # flip along spatial dimensions
             r = torch.rand(1)
             if r < 1 / 3:  # flip along fully sampled dimension
                 k = torch.fft.fft(torch.fft.fft(k, dim=-1), dim=-1, norm="forward")
-                gt = torch.flip(gt, (-1,))
+                if gt is not None:
+                    gt = flip(gt, (-1,))
                 if csm is not None:
-                    csm = torch.flip(csm, (-1,))
+                    csm = flip(csm, (-1,))
                 flippedx = 1
             elif r < 2 / 3:  # flip along y
                 k = torch.fft.fft(torch.fft.fft(k, dim=-1), dim=-1, norm="forward")
                 k = k.conj()
-                gt = torch.flip(gt, (-2,))
+                if gt is not None:
+                    gt = flip(gt, (-2,))
                 if csm is not None:
-                    csm = torch.flip(csm, (-2,))
+                    csm = flip(csm, (-2,))
                 flippedy = 1
             else:  # flip along x and y
                 k = k.conj()
-                gt = torch.flip(gt, (-2, -1))
+                if gt is not None:
+                    gt = flip(gt, (-2, -1))
                 if csm is not None:
-                    csm = torch.flip(csm, (-2, -1))
+                    csm = flip(csm, (-2, -1))
                 flippedy = 1
                 flippedx = 1
             if k.shape[-4] > 1 and self.flip_view and torch.rand(1) > 0.5:
                 # flip along view dimension
                 k = torch.flip(k, (-4,))
-                gt = torch.flip(gt, (-4,))
+                if gt is not None:
+                    gt = torch.flip(gt, (-4,))
                 if csm is not None:
                     csm = torch.flip(csm, (-4,))
                 flippedz = 1
 
         if torch.rand(1) < self.p_flip_temporal:
             k = torch.flip(k, (-3,))
-            gt = torch.flip(gt, (-3,))
+            if gt is not None:
+                gt = torch.flip(gt, (-3,))
             if csm is not None:
                 csm = torch.flip(csm, (-3,))
             flippedt = 1
@@ -83,7 +98,8 @@ class CineAugment:
 
         augmentinfo = torch.tensor([flippedx, flippedy, flippedz, flippedt, shuffled, phase])
         sample["k"] = k.resolve_conj().contiguous()
-        sample["gt"] = gt.resolve_conj().contiguous()
+        if gt is not None:
+            sample["gt"] = gt.resolve_conj().contiguous()
         sample["augmentinfo"] = augmentinfo
         if csm is not None:
             sample["csm"] = csm.resolve_conj().contiguous()
