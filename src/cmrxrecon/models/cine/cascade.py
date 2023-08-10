@@ -246,14 +246,14 @@ class Cascade(CineModel):
         if w := weights["charbonnier_weight"]:
             charbonnier_loss = (F.mse_loss(prediction, gt, reduction="none") + 1e-3).sqrt().mean()
             loss = loss + w * charbonnier_loss
-        if ("kfull" in batch) and (
-            (l1w := weights["l1_coilwise_weight"])
-            or (l2w := weights["l2_coilwise_weight"])
-            or (l2gw := weights["greedy_coilwise_weight"])
-            or (kw := weights["l2_k_weight"])
-        ):
+
+        l1w = weights["l1_coilwise_weight"]
+        l2w = weights["l2_coilwise_weight"]
+        l2gw = weights["greedy_coilwise_weight"]
+        kw = weights["l2_k_weight"]
+        if ("kfull" in batch) and any([l1w, l2w, l2gw, kw]):
             kfull = batch.pop("kfull") * norm
-            if l1w or l2w or l2gw:
+            if any([l1w, l2w, l2gw]):
                 gt_coil_wise = c2r(torch.fft.ifft2(kfull, norm="ortho"))
                 if l1w and ("x" in ret):
                     loss = loss + l1w * F.l1_loss(c2r(ret["x"]), gt_coil_wise)
@@ -262,7 +262,7 @@ class Cascade(CineModel):
                 if l2gw and ("xs" in ret):
                     greedy_x_cw = sum([F.mse_loss(c2r(x), gt_coil_wise) for x in ret["xs"]])
                     loss = loss + l2gw * greedy_x_cw
-            if kw:
+            if kw and ("x" in ret):
                 k_loss = F.mse_loss(c2r(torch.fft.fft2(ret["x"], norm="ortho")), c2r(kfull))
                 loss = loss + kw * k_loss
 
