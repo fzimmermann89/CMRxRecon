@@ -38,7 +38,7 @@ for fn in filenames:
 
 for sample in tqdm(list(ordered.values())):
     names = sorted(sample)
-    axis = names[0].stem.split("_")[-1]
+    view = names[0].stem.split("_")[-1]
     img = None
     for fn in names:
         if "AccFactor08" in str(fn):
@@ -54,10 +54,11 @@ for sample in tqdm(list(ordered.values())):
             new = current_mask & ~joint_mask
             img[new] = datac[new]
             joint_mask |= current_mask
-    mask = joint_mask[0, 0, 0, :, 0]
-    k = shift(datac)
+    mask = np.fft.fftshift(joint_mask)[0, 0, 0, :, 0]
+    k = shift(img)
     k = np.stack((k.real.astype(np.float32), k.imag.astype(np.float32)), -1)
     k = np.transpose(k, (1, 3, 0, 2, 4, 5))
+    k[np.isclose(k, 0.0)] = 0.0
     cpath = out_path / view / f"{datac.shape[-1]}_{datac.shape[-2]}_{datac.shape[1]}"
     cpath.mkdir(parents=True, exist_ok=True)
     outfilename = cpath / (fn.parent.name + ".h5")
