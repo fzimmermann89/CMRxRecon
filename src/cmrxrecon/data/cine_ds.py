@@ -7,15 +7,15 @@ from torch.utils.data import Dataset
 from typing import Any, Callable
 from cmrxrecon.models.utils.csm import sigpy_espirit
 from cmrxrecon.models.utils import rss
-from .utils import create_mask
-from .augments import CineAugment
+from cmrxrecon.data.utils import create_mask
+from cmrxrecon.data.augments import CineAugment
 
 
 class CineDataDS(Dataset):
     def __init__(
         self,
         path,
-        acceleration: tuple[int,] = (4,),
+        acceleration: tuple[int, ...] = (4,),
         singleslice: bool = True,
         random_acceleration: bool | float = False,
         center_lines: int = 24,
@@ -123,7 +123,8 @@ class CineDataDS(Dataset):
         if self.return_kfull:
             ret["kfull"] = ret["k"]
             ret["k"] = ret["k"] * mask
-            ret["gt"] = rss(torch.fft.ifft2(ret["kfull"], norm="ortho"), 0)
+            ret["xfull"] = torch.fft.ifft2(ret["kfull"], norm="ortho")
+            ret["gt"] = rss(ret["xfull"], 0)
         return ret
 
 
@@ -225,4 +226,105 @@ class CineTestDataDS(Dataset):
             csm = sigpy_espirit(k_data_centered[0])
             ret["csm"] = csm.transpose((1, 0, 2, 3))  # (c,z,us,fs)
 
+        return ret
+
+
+class CineSelfSupervisedDataDS(Dataset):
+    def __init__(
+        self,
+        path,
+        acceleration: tuple[tuple[int, int], ...] = ((4, 0),),
+        singleslice: bool = True,
+        center_lines: int = 24,
+        return_csm: bool = False,
+        augments: bool = True,
+    ):
+        """
+        A Cine Self Supervised Dataset
+        path: Path(s) to prepared h5 files
+        acceleration: tuple of tuples(acceleration factors,first line) to randomly choose from
+        single slice: if true, return a single z-slice/view, otherwise return all for one subject
+        random_acceleration: randomly choose offset for undersampling mask
+        center_lines: ACS lines. shall match data.
+        augments: augment data
+
+        A sample consists of a dict with
+            - k: undersampled k-data (shifted, k=0 is on the corner)
+            - mask: mask (z, t, x, y)
+            - k_target
+            - mask_target
+
+
+        Order of Axes:
+         (Coils , Slice/view, Time, Phase Enc. (undersampled), Frequency Enc. (fully sampled))
+        """
+        if isinstance(path, (str, Path)):
+            path = [Path(path)]
+        self.filenames = sum([list(Path(p).rglob(f"P*.h5")) for p in path], [])
+        self.shapes = [(h5py.File(fn)["k"]).shape for fn in self.filenames]
+        self.accumslices = np.cumsum(np.array([s[0] for s in self.shapes]))
+        self.singleslice = singleslice
+        self.acceleration = acceleration
+        self.center_lines = center_lines
+
+        if augments:
+            self.augments: Callable = CineAugment(
+                p_flip_spatial=0.4,
+                p_flip_temporal=0.2,
+                p_shuffle_coils=0.2,
+                p_phase=0.2,
+                flip_view=False,
+            )
+        else:
+            self.augments = lambda x: x
+
+    def __len__(self):
+        if self.singleslice:
+            return self.accumslices[-1]
+        else:
+            return len(self.filenames)
+
+    def __getitem__(self, idx) -> dict[str, torch.Tensor]:
+        if idx >= len(self):
+            raise IndexError
+
+        acceleration, offset = self.acceleration[int(torch.randint(len(self.acceleration), size=(1,)))]
+
+        filenr = np.argmax(self.accumslices > idx) if self.singleslice else idx
+        if self.singleslice:
+            # return a single slice for each subject
+            slicenr = idx - self.accumslices[filenr - 1] if filenr > 0 else idx
+            selection = slice(slicenr, slicenr + 1)
+        else:
+            # return all slices for each subject
+            selection = slice(None)
+
+        with h5py.File(self.filenames[filenr], "r") as file:
+            lines = file["k"].shape[-5]
+            mask_in = np.array(file["mask"])
+            k_tmp = torch.as_tensor(np.array(file["k"][selection, mask_in]))
+            k = torch.zeros(k_tmp.shape[0], lines, *k_tmp.shape[2:], dtype=k_tmp.dtype)
+            k[:, mask_in, :, :, :] = k_tmp
+
+        k = torch.view_as_complex(k).permute((3, 0, 2, 1, 4))
+        ret = {"k": k}
+        ret = self.augments(ret)
+        k_target = ret.pop("k")
+
+        mask = create_mask(lines, self.center_lines, acceleration, offset)
+        mask &= mask_in
+        mask_target = torch.as_tensor(mask_in[None, None, :, None])
+        mask = torch.as_tensor(mask[None, None, :, None])
+
+        k = k_target * mask
+        ret = {
+            **ret,
+            "k": k,
+            "mask": mask,
+            "k_target": k_target,
+            "mask_target": mask_target,
+            "acceleration": float(acceleration),
+            "offset": float(offset),
+            "axis": float("sax" in self.filenames[filenr].name),
+        }
         return ret
