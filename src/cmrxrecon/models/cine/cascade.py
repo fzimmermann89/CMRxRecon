@@ -65,10 +65,12 @@ class CascadeNet(torch.nn.Module):
         embed_dim=128,
         crop_threshold: float = 0.005,
         lambda_init: float = 1.0,
+        overwrite_k: bool = False,
         **kwargs,
     ):
         super().__init__()
         self.input_rss = input_rss
+        self.overwrite_k = overwrite_k
         embed_dim: int = 128
         if unet_args is None:
             unet_args = dict(
@@ -124,7 +126,12 @@ class CascadeNet(torch.nn.Module):
             # x.append(x_net)
             x.append(x_dc)
 
-        pred = rss(x[-1])
+        if self.overwrite_k:
+            kp = torch.fft.fftn(x[-1], dim=(-2, -1), norm="ortho")
+            kp = torch.where(mask > 0.5, k, kp)
+            pred = rss(torch.fft.ifftn(kp, dim=(-2, -1), norm="ortho"))
+        else:
+            pred = rss(x[-1])
         return dict(prediction=pred, rss=x_rss, xs=x, x=x[-1])
 
 
@@ -151,6 +158,7 @@ class Cascade(CineModel):
         greedy_coilwise_weight: tuple[float, float] | float = 0.0,
         l2_k_weight: tuple[float, float] | float = 0.0,
         lambda_init: float = 1.0,
+        overwrite_k: bool = False,
         **kwargs,
     ):
         super().__init__()
@@ -182,6 +190,7 @@ class Cascade(CineModel):
             embed_dim=embed_dim,
             crop_threshold=crop_threshold,
             lambda_init=lambda_init,
+            overwrite_k=overwrite_k,
             **kwargs,
         )
         self.EMANorm = EMA(alpha=0.9, max_iter=100)
