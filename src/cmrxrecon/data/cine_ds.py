@@ -46,7 +46,7 @@ class CineDataDS(Dataset):
         """
         if isinstance(path, (str, Path)):
             path = [Path(path)]
-        self.filenames = sum([list(Path(p).rglob(f"P*.h5")) for p in path], [])
+        self.filenames = sum([list(Path(p).rglob("P*.h5")) for p in path], [])
         self.shapes = [(h5py.File(fn)["k"]).shape for fn in self.filenames]
         self.accumslices = np.cumsum(np.array([s[0] for s in self.shapes]))
         self.singleslice = singleslice
@@ -155,7 +155,7 @@ class CineTestDataDS(Dataset):
             path = (Path(path),)
         if isinstance(axis, str):
             axis = (axis,)
-        self.filenames = sum([list(Path(p).rglob(f"cine_{ax}.mat")) for p in path for ax in axis], [])
+        self.filenames = sorted(sum([list(Path(p).rglob(f"cine_{ax}.mat")) for p in path for ax in axis], []))
         self.shapes = [self._getdata(fn).shape for fn in self.filenames]
         self.accumslices = np.cumsum(np.array([s[1] for s in self.shapes]))
         self.return_csm = return_csm
@@ -260,7 +260,7 @@ class CineSelfSupervisedDataDS(Dataset):
         """
         if isinstance(path, (str, Path)):
             path = [Path(path)]
-        self.filenames = sum([list(Path(p).rglob(f"P*.h5")) for p in path], [])
+        self.filenames = sorted(sum([list(Path(p).rglob("P*.h5")) for p in path], []))
         self.shapes = [(h5py.File(fn)["k"]).shape for fn in self.filenames]
         self.accumslices = np.cumsum(np.array([s[0] for s in self.shapes]))
         self.singleslice = singleslice
