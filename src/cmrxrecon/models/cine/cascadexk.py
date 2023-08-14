@@ -353,3 +353,96 @@ class CascadeXK(CineModel):
         self.log("rss_loss", rss_loss, on_step=True, on_epoch=True, prog_bar=False, logger=True)
 
         return loss
+
+
+class CascadeXKv2(CascadeXK):
+    def __init__(
+        self,
+        input_rss=True,
+        input_k0=True,
+        lr=1e-3,
+        weight_decay=1e-4,
+        schedule=True,
+        Nc: int = 10,
+        T: int = 3,
+        embed_dim=192,
+        crop_threshold: float = 0.000,
+        phase2_pct: float = 0.3,
+        l2_weight: tuple[float, float] | float = (0.1, 0.5),
+        ssim_weight: tuple[float, float] | float = (0.0, 0.4),
+        greedy_weight: tuple[float, float] | float = 0.0,
+        l1_weight: tuple[float, float] | float = (0.3, 0.5),
+        charbonnier_weight: tuple[float, float] | float = 0.0,
+        max_weight: tuple[float, float] | float = (1e-4, 1e-3),
+        l1_coilwise_weight: tuple[float, float] | float = (2.0, 0.0),
+        l2_coilwise_weight: tuple[float, float] | float = (2.0, 0.5),
+        l2_k_weight: tuple[float, float] | float = (0.4, 0.05),
+        greedy_coilwise_weight: tuple[float, float] | float = (0.6, 0.2),
+        lambda_init: float = 0.5,
+        overwrite_k: bool = False,
+        **kwargs,
+    ):
+        unet_args = dict(
+            dim=2.5,
+            layer=3,
+            filters=48,
+            padding_mode="zeros",
+            residual="inner",
+            latents=(False, "film_16", "film_24", "film_32"),
+            norm="group16",
+            feature_growth=(1, 1.667, 2, 2, 1, 1),
+            activation="leakyrelu",
+            change_filters_last=False,
+            downsample_dimensions=((-1, -2), (-1, -2, -3), (-1, -2, -3), (-1, -2, -3), (-1, -2, -3), (-1, -2, -3)),
+            up_mode="linear_reduce",
+            coordconv=(True, False),
+        )
+
+        k_unet_args = dict(
+            dim=2,
+            filters=64,
+            layer=2,
+            feature_growth=(1.0, 1.5, 2),
+            latents=(False, "film_16", "film_32"),
+            conv_per_enc_block=2,
+            conv_per_dec_block=2,
+            downsample_dimensions=((-2,), (-1, -2)),
+            change_filters_last=False,
+            up_mode="linear_reduce",
+            residual="inner",
+            coordconv=True,
+            reszero=False,
+            norm="group16",
+            activation="silu",
+        )
+
+        unet_args.update(kwargs.pop("unet_args", {}))
+        k_unet_args.update(kwargs.pop("k_unet_args", {}))
+
+        super().__init__(
+            input_rss=input_rss,
+            input_k0=input_k0,
+            lr=lr,
+            weight_decay=weight_decay,
+            schedule=schedule,
+            Nc=Nc,
+            T=T,
+            embed_dim=embed_dim,
+            crop_threshold=crop_threshold,
+            phase2_pct=phase2_pct,
+            l2_weight=l2_weight,
+            ssim_weight=ssim_weight,
+            greedy_weight=greedy_weight,
+            l1_weight=l1_weight,
+            charbonnier_weight=charbonnier_weight,
+            max_weight=max_weight,
+            l1_coilwise_weight=l1_coilwise_weight,
+            l2_coilwise_weight=l2_coilwise_weight,
+            l2_k_weight=l2_k_weight,
+            greedy_coilwise_weight=greedy_coilwise_weight,
+            lambda_init=lambda_init,
+            overwrite_k=overwrite_k,
+            unet_args=unet_args,
+            k_unet_args=k_unet_args,
+            **kwargs,
+        )

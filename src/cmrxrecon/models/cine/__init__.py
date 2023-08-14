@@ -9,4 +9,5 @@ from .csm_free_pdnet import CSMFreeMultiCoilDataConsPDNetwork
 from .rss import RSS
 from .cascade import Cascade
 from .cascadexk import CascadeXK
+from .cascadexk import CascadeXKv2
 from .csm_free_recon import CSMFreeReconDeluxeNN
