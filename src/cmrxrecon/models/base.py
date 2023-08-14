@@ -5,8 +5,9 @@ from neptune.new.types import File as neptuneFile
 from pytorch_lightning.loggers.neptune import NeptuneLogger
 from cmrxrecon.models.utils.ssim import ssim
 import matplotlib.pyplot as plt
-import datetime, random, string
+import random, string
 from pathlib import Path
+from datetime import datetime
 import numpy as np
 
 
@@ -38,39 +39,40 @@ class ValidationMixin(ABC):
         self.log("val_ssim", ssim_value, on_step=False, on_epoch=True, prog_bar=True, logger=True)
         self.log("val_nrmse", nrmse, on_step=False, on_epoch=True, prog_bar=False, logger=True)
 
-        if batch_idx == 0 and False:
+        if batch_idx == 0:
+            acceleration = int(batch["acceleration"].item())
             scalemin, scalemax = gt.min().item(), gt.max().item()
 
             rndpath = Path(
-                f"{self.__class__.__name__}_{datetime.now().strftime('%m%d%H%M')}_{''.join(random.choices(string.ascii_uppercase + string.digits, k=4))}"
+                f"{self.__class__.__name__}_Acc{acceleration}_{datetime.now().strftime('%m%d%H%M')}_{''.join(random.choices(string.ascii_uppercase + string.digits, k=4))}"
             )
 
             def scale(data):
-                return (data[0, 0, 0, :, :].detach().cpu().numpy() - scalemin) / (scalemax - scalemin)
+                return (data[0, 0].detach().cpu().numpy() - scalemin) / (scalemax - scalemin)
 
             def plot(data, colorbar=False, cmap="gray"):
-                fig, ax = plt.subplots(1)
+                fig, ax = plt.subplots(1, figsize=(6 + 2 * colorbar, 2.5), tight_layout=True)
+                data = data[(data.ndim - 2) * (0,)]
                 s = ax.matshow(data, cmap=cmap)
                 if colorbar:
                     plt.colorbar(s, ax=ax)
                 ax.axis("off")
-                fig.tight_layout()
                 return fig
 
             def log(name, data, **kwargs):
                 for logger in self.loggers:
                     if isinstance(logger, NeptuneLogger):
-                        logger.experiment[name].log(neptuneFile.as_image(data))
+                        logger.experiment["val/" + name].log(neptuneFile.as_image(data))
                         break
                 else:
                     rndpath.mkdir(exist_ok=True)
                     if isinstance(data, (torch.Tensor, np.ndarray)):
-                        np.save(rndpath / name + ".npy", data)
+                        np.save(str(rndpath / name) + ".npy", data)
                     if isinstance(data, plt.Figure):
                         f = data
                     else:
                         f = plot(data, **kwargs)
-                    imgfilename = rndpath / name + ".png"
+                    imgfilename = str(rndpath / name) + ".png"
                     f.savefig(imgfilename)
                     print("no neptune logger. saved as", imgfilename)
 
@@ -78,10 +80,10 @@ class ValidationMixin(ABC):
             pred_img = scale(prediction)
             xrss_img = scale(rss)
             error = np.abs(pred_img - gt_img)
-            log("val/image", pred_img)
-            log("val/images/gt", gt_img)
-            log("val/images/xrss", xrss_img)
-            log("val/images/error", error, cmap="viridis", colorbar=True)
+            log("prediction", pred_img)
+            log("gt", gt_img)
+            log("xrss", xrss_img)
+            log("error", error, cmap="viridis", colorbar=True)
 
 
 class TestPredictMixin(ABC):

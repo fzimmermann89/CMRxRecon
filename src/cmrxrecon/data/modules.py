@@ -32,6 +32,7 @@ class CineData(pl.LightningDataModule):
         return_csm: bool = False,
         return_kfull: bool = False,
         test_data_dir: Optional[str] = "files/MultiCoil/Cine/ValidationSet",
+        val_acceleration: tuple[int, ...] | None = None,
     ):
         """
         A Cine Datamodule
@@ -105,8 +106,10 @@ class CineData(pl.LightningDataModule):
             ]
 
             self.train_multidatasets = MultiDataSets(datasets)
+            if val_acceleration is None:
+                val_acceleration = unique_accelerations
             self.val_dataset = CineDataDS(
-                val_ds, return_csm=return_csm, acceleration=unique_accelerations, random_acceleration=False, **self.kwargs
+                val_ds, return_csm=return_csm, acceleration=val_acceleration, random_acceleration=False, **self.kwargs
             )
         else:
             self.train_multidatasets = None
