@@ -584,8 +584,8 @@ def act(name: str = "ReLu"):
         return nn.PReLU
     elif name.lower() == "leakyrelu" or name.lower() == "lrelu":
         return partial(nn.LeakyReLU, inplace=True)
-    elif name.lower() == "silu":
-        return nn.SiLU
+    elif name.lower() == "silu" or name.lower() == "swish":
+        return partial(nn.SiLU(), inplace=True)
     elif name.lower() == "gelu":
         return nn.GELU
     else:
