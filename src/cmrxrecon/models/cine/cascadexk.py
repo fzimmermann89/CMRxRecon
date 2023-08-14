@@ -91,6 +91,7 @@ class CascadeNet(torch.nn.Module):
         crop_threshold: float = 0.005,
         lambda_init=1e-6,
         overwrite_k: bool = False,
+        emb_slice=False,
         **kwargs,
     ):
         super().__init__()
@@ -132,6 +133,7 @@ class CascadeNet(torch.nn.Module):
 
         self.embed_augment_channels = 6
         self.embed_axis_channels = 2
+        self.embed_slice_channels = emb_slice
         self.embed_acceleration_map = Mapper([2, 4, 6, 8, 10, 12])
         self.embed_iter_map = Mapper([0, 1, 2, 3, 4, 5])
         self.T = T
@@ -140,6 +142,7 @@ class CascadeNet(torch.nn.Module):
             + self.embed_axis_channels
             + self.embed_acceleration_map.out_dim
             + self.embed_iter_map.out_dim
+            + self.embed_slice_channels
         )
 
         self.embed_net = torch.compile(MLP([embed_input_channels, embed_dim, embed_dim]))
@@ -152,7 +155,11 @@ class CascadeNet(torch.nn.Module):
         accelerationinfo = self.embed_acceleration_map(acceleration)
         axis = other.get("axis", torch.zeros(k.shape[0], device=k.device)).float()[:, None]
         axisinfo = torch.cat((axis, 1 - axis), dim=-1)
-        static_info = torch.cat((augmentinfo, axisinfo, accelerationinfo), dim=-1)
+        sliceinfo = other.get("slice", torch.zeros(k.shape[0], device=k.device)).float()[:, None] / 10
+        if self.embed_slice_channels:
+            static_info = torch.cat((augmentinfo, axisinfo, accelerationinfo, sliceinfo), dim=-1)
+        else:
+            static_info = torch.cat((augmentinfo, axisinfo, accelerationinfo), dim=-1)
 
         x0 = torch.fft.ifftn(k, dim=(-2, -1), norm="ortho")
         x_rss = rss(x0)
@@ -208,6 +215,7 @@ class CascadeXK(CineModel):
         greedy_coilwise_weight: tuple[float, float] | float = 0.0,
         lambda_init: float = 0.5,
         overwrite_k: bool = False,
+        emb_slice=False,
         **kwargs,
     ):
         super().__init__()
@@ -261,6 +269,7 @@ class CascadeXK(CineModel):
             crop_threshold=crop_threshold,
             lambda_init=lambda_init,
             overwrite_k=overwrite_k,
+            emb_slice=emb_slice,
             **kwargs,
         )
         self.EMANorm = EMA(alpha=0.9, max_iter=100)
@@ -380,6 +389,7 @@ class CascadeXKv2(CascadeXK):
         greedy_coilwise_weight: tuple[float, float] | float = (0.6, 0.2),
         lambda_init: float = 0.5,
         overwrite_k: bool = False,
+        emb_slice=True,
         **kwargs,
     ):
         unet_args = dict(
@@ -444,5 +454,6 @@ class CascadeXKv2(CascadeXK):
             overwrite_k=overwrite_k,
             unet_args=unet_args,
             k_unet_args=k_unet_args,
+            emb_slice=emb_slice,
             **kwargs,
         )
