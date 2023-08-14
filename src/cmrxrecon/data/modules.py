@@ -72,25 +72,20 @@ class CineData(pl.LightningDataModule):
         )
         unique_accelerations = sorted(set(acceleration))
         if data_dir is not None and data_dir != "":
-            different_sizes = sum([list((Path(self.data_dir) / ax).glob("*_*_*")) for ax in self.axis], [])
+            different_sizes = sorted(sum([list((Path(self.data_dir) / ax).glob("*_*_*")) for ax in self.axis], []))
 
             if not different_sizes:
                 raise ValueError(f"No data found in {Path(self.data_dir).absolute()}")
-
+            val_paths = defaultdict(list)
             paths = defaultdict(list)
             for sizepath in different_sizes:
                 name = sizepath.name
                 if self.singleslice:  # ignore number of slices
                     name = "_".join(name.split("_")[:-1])
-                paths[name].append(sizepath)
-
-            # use first dataset as validation set
-            val_size = list(paths.keys())[0]
-            val_ds = paths[val_size][0]
-            if len(paths[val_size]) > 1:
-                paths[val_size] = paths[val_size][1:]
-            else:
-                del paths[val_size]
+                if "val" in name:
+                    val_paths[name].append(sizepath)
+                else:
+                    paths[name].append(sizepath)
 
             datasets = [
                 CineDataDS(
@@ -104,16 +99,19 @@ class CineData(pl.LightningDataModule):
                 )
                 for path in paths.values()
             ]
-
-            self.train_multidatasets = MultiDataSets(datasets)
             if val_acceleration is None:
                 val_acceleration = unique_accelerations
-            self.val_dataset = CineDataDS(
-                val_ds, return_csm=return_csm, acceleration=val_acceleration, random_acceleration=False, **self.kwargs
-            )
+
+            val_datasets = [
+                CineDataDS(val_path, return_csm=return_csm, acceleration=acc, random_acceleration=False, **self.kwargs)
+                for val_path in sorted(list(val_paths.values()))
+                for acc in val_acceleration
+            ]
+            self.train_multidatasets = MultiDataSets(datasets)
+            self.val_multidatasets = MultiDataSets(val_datasets)
         else:
             self.train_multidatasets = None
-            self.val_dataset = None
+            self.val_multidatasets = None
         if test_data_dir is not None and test_data_dir != "":
             self.test_dataset = CineTestDataDS(test_data_dir, axis=self.axis, return_csm=self.return_csm)
 
@@ -128,12 +126,11 @@ class CineData(pl.LightningDataModule):
         )
 
     def val_dataloader(self):
-        if self.val_dataset is None:
+        if self.val_multidatasets is None:
             raise ValueError("No validation data available")
         return DataLoader(
-            self.val_dataset,
-            shuffle=False,
-            batch_size=1,
+            self.val_multidatasets,
+            batch_sampler=MultiDataSetsSampler(self.val_multidatasets.lenghts(), batch_size=1, droplast=False, shuffle=False),
             num_workers=8,
         )
 

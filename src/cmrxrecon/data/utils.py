@@ -50,15 +50,19 @@ class MultiDataSetsSampler(torch.utils.data.Sampler):
     samples from all datasets with batches always being sampled from the same dataset
     """
 
-    def __init__(self, lengths: tuple[int, ...], batch_size: int, droplast: bool = True):
+    def __init__(self, lengths: tuple[int, ...], batch_size: int, droplast: bool = True, shuffle: bool = True):
         self.batch_size = batch_size
         self._lengths = lengths
         self.droplast = droplast
+        self.shuffle = shuffle
 
     def __iter__(self) -> Iterator[int]:
         batches = []
         for ds_id, lenghts_of_ds in enumerate(self._lengths):
-            perm = torch.randperm(lenghts_of_ds)
+            if self.shuffle:
+                perm = torch.randperm(lenghts_of_ds)
+            else:
+                perm = torch.arange(lenghts_of_ds)
             for i in range(
                 0,
                 len(perm) - self.batch_size if self.droplast else len(perm),
@@ -67,8 +71,11 @@ class MultiDataSetsSampler(torch.utils.data.Sampler):
                 sample_ids = perm[i : i + self.batch_size]
                 ids = [(ds_id, int(sample_id)) for sample_id in sample_ids]
                 batches.append(ids)
-
-        for idx in torch.randperm(len(batches)):
+        if self.shuffle:
+            order = torch.randperm(len(batches))
+        else:
+            order = torch.arange(len(batches))
+        for idx in order:
             yield batches[idx]
 
     def __len__(self) -> int:

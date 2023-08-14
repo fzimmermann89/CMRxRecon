@@ -1,4 +1,5 @@
 from abc import ABC
+from termios import VMIN
 import torch
 import pytorch_lightning as pl
 from neptune.new.types import File as neptuneFile
@@ -31,29 +32,31 @@ class ValidationMixin(ABC):
         prediction, rss = ret["prediction"], ret["rss"]
         loss = torch.nn.functional.mse_loss(prediction, gt)
         rss_loss = torch.nn.functional.mse_loss(rss, gt)
-        ssim_value = ssim(gt / gt.max(), prediction / prediction.max())
-        nrmse = torch.nn.functional.mse_loss(prediction / prediction.max(), gt / gt.max())
+        pred_m = prediction / prediction.max()
+        gt_m = gt / gt.max()
+        ssim_value = ssim(gt_m, pred_m)
+        nmse = torch.nn.functional.mse_loss(gt_m, pred_m) / torch.nn.functional.mse_loss(gt_m, torch.zeros_like(gt))
 
         self.log("val_advantage", (rss_loss - loss) / rss_loss, on_step=True, on_epoch=True, prog_bar=True, logger=True)
         self.log("val_loss", loss, on_step=True, on_epoch=True, prog_bar=False, logger=True)
         self.log("val_ssim", ssim_value, on_step=False, on_epoch=True, prog_bar=True, logger=True)
-        self.log("val_nrmse", nrmse, on_step=False, on_epoch=True, prog_bar=False, logger=True)
-
+        self.log("val_nmse", nmse, on_step=False, on_epoch=True, prog_bar=False, logger=True)
         if batch_idx == 0:
             acceleration = int(batch["acceleration"].item())
+            axis = ("lax", "sax")[int(batch["axis"].item())]
             scalemin, scalemax = gt.min().item(), gt.max().item()
 
             rndpath = Path(
-                f"{self.__class__.__name__}_Acc{acceleration}_{datetime.now().strftime('%m%d%H%M')}_{''.join(random.choices(string.ascii_uppercase + string.digits, k=4))}"
+                f"{self.__class__.__name__}_Acc{acceleration}_{axis}_{datetime.now().strftime('%m%d%H%M')}_{''.join(random.choices(string.ascii_uppercase + string.digits, k=4))}"
             )
 
             def scale(data):
                 return (data[0, 0].detach().cpu().numpy() - scalemin) / (scalemax - scalemin)
 
-            def plot(data, colorbar=False, cmap="gray"):
+            def plot(data, colorbar=False, cmap="gray", **kwargs):
                 fig, ax = plt.subplots(1, figsize=(6 + 2 * colorbar, 2.5), tight_layout=True)
-                data = data[(data.ndim - 2) * (0,)]
-                s = ax.matshow(data, cmap=cmap)
+                data = data[(data.ndim - 2) * (-1,)]
+                s = ax.matshow(data, cmap=cmap, **kwargs)
                 if colorbar:
                     plt.colorbar(s, ax=ax)
                 ax.axis("off")
@@ -74,16 +77,21 @@ class ValidationMixin(ABC):
                         f = plot(data, **kwargs)
                     imgfilename = str(rndpath / name) + ".png"
                     f.savefig(imgfilename)
+                    plt.close(f)
                     print("no neptune logger. saved as", imgfilename)
 
             gt_img = scale(gt)
             pred_img = scale(prediction)
             xrss_img = scale(rss)
             error = np.abs(pred_img - gt_img)
+            xrss_error = np.abs(gt_img - xrss_img)
+            maxerror = 0.1
             log("prediction", pred_img)
             log("gt", gt_img)
             log("xrss", xrss_img)
-            log("error", error, cmap="viridis", colorbar=True)
+            log("error", error, cmap="viridis", colorbar=True, vmin=0, vmax=maxerror)
+            log("xrss_error", xrss_error, cmap="viridis", colorbar=True, vmin=0, vmax=maxerror)
+            plt.close("all")
 
 
 class TestPredictMixin(ABC):

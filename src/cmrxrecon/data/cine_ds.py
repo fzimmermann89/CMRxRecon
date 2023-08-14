@@ -50,6 +50,8 @@ class CineDataDS(Dataset):
         self.shapes = [(h5py.File(fn)["k"]).shape for fn in self.filenames]
         self.accumslices = np.cumsum(np.array([s[0] for s in self.shapes]))
         self.singleslice = singleslice
+        if isinstance(acceleration, (int, float)):
+            acceleration = (acceleration,)
         self.acceleration = acceleration
         self.random_acceleration = random_acceleration
         self.center_lines = center_lines
@@ -91,6 +93,7 @@ class CineDataDS(Dataset):
         else:
             # return all slices for each subject
             selection = slice(None)
+            slicenr = 0
 
         with h5py.File(self.filenames[filenr], "r") as file:
             lines = file["k"].shape[-5]
@@ -105,6 +108,7 @@ class CineDataDS(Dataset):
                 gt = file["sos"][selection]
             if self.return_csm:
                 csm = file["csm"][selection]
+            slicevalue = slicenr / (file["sos"].shape[0] - 1)
 
         k = torch.view_as_complex(k).permute((3, 0, 2, 1, 4))
         mask = torch.as_tensor(mask[None, None, :, None])
@@ -114,7 +118,8 @@ class CineDataDS(Dataset):
             "gt": gt,
             "acceleration": float(acceleration),
             "offset": float(offset),
-            "axis": float("sax" in self.filenames[filenr].name),
+            "axis": float("sax" in self.filenames[filenr].parent.parent.stem),
+            "slice": slicevalue,
         }
         if self.return_csm:
             csm = torch.view_as_complex(torch.as_tensor(csm)).swapaxes(0, 1) if self.return_csm else None
@@ -199,6 +204,7 @@ class CineTestDataDS(Dataset):
         else:
             # return all slices for each subject
             selection = slice(None)
+            slicenr = 0
 
         filename = self.filenames[filenr]
 
@@ -206,6 +212,7 @@ class CineTestDataDS(Dataset):
             data = self._getdata(file)
             shape = [data.shape[i] for i in (2, 1, 0, 3, 4)]
             k_data_centered = np.array(data[:, selection]).view(np.complex64)  # (t,z,c,us,fs)
+            slicevalue = slicenr / (data.shape[1] - 1)
         k_data = self._shift(k_data_centered).transpose((2, 1, 0, 3, 4))  # (c,z,t,us,fs)
         k_data = k_data.astype(np.complex64)
         mask = (~np.isclose(k_data[0, ..., :, :1], 0)).astype(np.float32)
@@ -220,6 +227,7 @@ class CineTestDataDS(Dataset):
             "axis": axis,
             "acceleration": acceleration,
             "offset": 0.0,
+            "slice": slicevalue,
         }
 
         if self.return_csm:
