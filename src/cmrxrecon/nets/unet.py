@@ -232,8 +232,9 @@ class Unet(nn.Module):
             _upsamplings.append(upsampling)
         upsamplings = (_upsamplings + [_upsamplings[-1]] * (layer - len(_upsamplings)))[:layer]
 
+        resblock = residual in ("inner", True, "both")
         block = partial(
-            ResidualCBlock if residual in ("inner", True, "both") else CBlock,
+            ResidualCBlock if resblock else CBlock,
             dim=dim,
             kernel_size=kernel_size,
             norm=norm,
@@ -245,8 +246,9 @@ class Unet(nn.Module):
             padding_mode="zeros" if padding_mode == "none" else padding_mode,
             split_dim=half_dim,
             final_norm=final_norm,
-            resZero=reszero,
         )
+        if resblock:
+            block = partial(block, resZero=reszero)
         join = Concat("crop" if padding_mode == "none" else "pad")
         if change_filters_last:
             features_enc = [(channels_in,) + (filters,) * (conv_per_enc_block - 1) + (int(filters * feature_growth(0)) & ~1,)]
