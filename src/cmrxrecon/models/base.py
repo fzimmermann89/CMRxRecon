@@ -93,6 +93,7 @@ class ValidationMixin(ABC):
             log("error", error, cmap="viridis", colorbar=True, vmin=0, vmax=maxerror)
             log("xrss_error", xrss_error, cmap="viridis", colorbar=True, vmin=0, vmax=maxerror)
             plt.close("all")
+        return ret
 
 
 class TestPredictMixin(ABC):
