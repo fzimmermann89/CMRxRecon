@@ -128,8 +128,9 @@ class CineDataDS(Dataset):
         if self.return_kfull:
             ret["kfull"] = ret["k"]
             ret["k"] = ret["k"] * mask
-            # ret["xfull"] = torch.fft.ifft2(ret["kfull"], norm="ortho")
-            ret["gt"] = rss(ret["xfull"], 0)
+            xfull = torch.fft.ifft2(ret["kfull"], norm="ortho")
+            # ret["xfull"] = xfull
+            ret["gt"] = rss(xfull, 0)
         return ret
 
 
