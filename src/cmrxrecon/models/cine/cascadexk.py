@@ -41,17 +41,24 @@ class CNNWrapper(torch.nn.Module):
             xc = x
             x_rss_c = x_rss
             crops = None
-        net_input = rearrange(c2r(xc), "b c z t x y r -> (b z) (r c) t x y")
+        xr = c2r(xc)
+        net_input = rearrange(xr, "b c z t x y r -> (b z) (r c) t x y")
         if self.include_rss:
             if x_rss is None:
                 x_rss_c = rss(xc)
             x_rss_c = rearrange(x_rss_c, "b z t x y -> (b z) t x y").unsqueeze(1)
             net_input = torch.cat((net_input, x_rss_c), 1)
         x_net, h = self.net(net_input, *args, **kwargs)
-        x_net = rearrange(x_net, "(b z) (r c) t x y -> b c z t x y r", b=len(x), r=2).contiguous()
-        x_net = r2c(x_net)
-        x_net = uncrop(x_net, x.shape, crops)
-        return x + x_net, h
+
+        if crops is not None:
+            x_net = rearrange(x_net, "(b z) (r c) t x y -> b c z t x y r", b=len(x), r=2).contiguous()
+            x_net = r2c(x_net)
+            x_net = uncrop(x_net, x.shape, crops)
+            xout = x + x_net
+        else:
+            x_net = rearrange(x_net, "(b z) (r c) t x y -> b c z t x y r", b=len(x), r=2)
+            xout = r2c(xr + x_net)
+        return xout, h
 
 
 class KCNNWrapper(torch.nn.Module):
@@ -162,7 +169,7 @@ class CascadeNet(torch.nn.Module):
             static_info = torch.cat((augmentinfo, axisinfo, accelerationinfo), dim=-1)
 
         x0 = torch.fft.ifftn(k, dim=(-2, -1), norm="ortho")
-        x_rss = rss(x0)
+        x0_rss = rss(x0)
 
         xi = x0
         hk = None
@@ -174,7 +181,7 @@ class CascadeNet(torch.nn.Module):
             iteration_info = self.embed_iter_map(t * torch.ones(k.shape[0], 1, device=k.device))
             z = self.embed_net(torch.cat((static_info, iteration_info), dim=-1))
             zlambda, znet, zknet = torch.chunk(z, 3, dim=1)
-            x_net, hx = self.net(xi, emb=znet, hin=hx, x_rss=None if t else x_rss)
+            x_net, hx = self.net(xi, emb=znet, hin=hx, x_rss=None if t else x0_rss)
             k_x_net = torch.fft.fft(x_net, dim=-2, norm="ortho")  # k space along undersampled dim
             k_net, hk = self.knet(k_x_net, prepared_k0=prepared_k0, emb=zknet, hin=hk)
             x_dc = self.dc(k, k_net, mask, zlambda)
@@ -187,7 +194,7 @@ class CascadeNet(torch.nn.Module):
             pred = rss(torch.fft.ifftn(kp, dim=(-2, -1), norm="ortho"))
         else:
             pred = rss(xi)
-        return dict(prediction=pred, rss=x_rss, xs=xs, ks=ks, x=xi)
+        return dict(prediction=pred, rss=x0_rss, xs=xs, ks=ks, x=xi)
 
 
 class CascadeXK(CineModel):
@@ -414,7 +421,7 @@ class CascadeXKv2(CascadeXK):
             layer=2,
             padding_mode="zeros",
             feature_growth=(1.0, 1.25, 2),
-            latents=(False, "film_16", "film_16"),
+            latents=(False, "film_8", "film_16"),
             conv_per_enc_block=2,
             conv_per_dec_block=2,
             downsample_dimensions=((-2,), (-1, -2)),
