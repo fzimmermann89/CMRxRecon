@@ -65,7 +65,8 @@ class ValidationMixin(ABC):
             def log(name, data, **kwargs):
                 for logger in self.loggers:
                     if isinstance(logger, NeptuneLogger):
-                        logger.experiment["val/" + name].log(neptuneFile.as_image(data))
+                        logdata = data[(data.ndim - 2) * (-1,)]
+                        logger.experiment["val/" + name].log(neptuneFile.as_image(logdata))
                         break
                 else:
                     rndpath.mkdir(exist_ok=True)
