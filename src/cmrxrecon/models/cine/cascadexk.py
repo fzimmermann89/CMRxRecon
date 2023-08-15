@@ -405,7 +405,7 @@ class CascadeXKv2(CascadeXK):
             change_filters_last=False,
             downsample_dimensions=((-1, -2), (-1, -2, -3), (-1, -2, -3), (-1, -2, -3), (-1, -2, -3), (-1, -2, -3)),
             up_mode="linear_reduce",
-            coordconv=(True, False),
+            coordconv=((True, False), False),
         )
 
         k_unet_args = dict(
@@ -421,7 +421,7 @@ class CascadeXKv2(CascadeXK):
             change_filters_last=False,
             up_mode="linear_reduce",
             residual="inner",
-            coordconv=True,
+            coordconv=(True, False),
             reszero=False,
             norm="group16",
             activation="silu",
