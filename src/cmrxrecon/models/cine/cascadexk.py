@@ -406,7 +406,7 @@ class CascadeXKv2(CascadeXK):
             padding_mode="zeros",
             residual="inner",
             latents=(False, "film_8", "film_16", "film_32"),
-            norm="group12",
+            norm="group16",
             feature_growth=(1, 1.334, 2, 2, 1, 1),
             activation="silu",
             change_filters_last=False,
