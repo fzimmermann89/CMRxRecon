@@ -420,7 +420,7 @@ class CascadeXKv2(CascadeXK):
             filters=64,
             layer=2,
             padding_mode="zeros",
-            feature_growth=(1.0, 1.25, 1.5),
+            feature_growth=(1.0, 1.25, 1.6),
             latents=(False, "film_8", "film_16"),
             conv_per_enc_block=2,
             conv_per_dec_block=2,
