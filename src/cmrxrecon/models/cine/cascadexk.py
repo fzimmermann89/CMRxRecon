@@ -405,13 +405,13 @@ class CascadeXKv2(CascadeXK):
             filters=48,
             padding_mode="zeros",
             residual="inner",
-            latents=(False, "film_8", "film_16", "film_24"),
-            norm="group16",
+            latents=(False, "film_8", "film_16", "film_32"),
+            norm="group12",
             feature_growth=(1, 1.334, 2, 2, 1, 1),
             activation="silu",
             change_filters_last=False,
             downsample_dimensions=((-1, -2), (-1, -2, -3), (-1, -2, -3), (-1, -2, -3), (-1, -2, -3), (-1, -2, -3)),
-            up_mode="linear_reduce",
+            up_mode="linear",
             coordconv=((True, False), False),
         )
 
@@ -420,7 +420,7 @@ class CascadeXKv2(CascadeXK):
             filters=64,
             layer=2,
             padding_mode="zeros",
-            feature_growth=(1.0, 1.25, 2),
+            feature_growth=(1.0, 1.25, 1.5),
             latents=(False, "film_8", "film_16"),
             conv_per_enc_block=2,
             conv_per_dec_block=2,
@@ -431,7 +431,7 @@ class CascadeXKv2(CascadeXK):
             coordconv=(True, False),
             reszero=False,
             norm="group16",
-            activation="silu",
+            activation="leakyrelu",
         )
 
         unet_args.update(kwargs.pop("unet_args", {}))
