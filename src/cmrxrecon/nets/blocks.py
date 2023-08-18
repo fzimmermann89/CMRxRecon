@@ -9,6 +9,7 @@ from einops import rearrange
 from itertools import repeat
 import collections
 from torch import nn
+import torch.utils.checkpoint
 
 
 class ResidualCBlock(nn.Module, EmbLayer):
@@ -29,8 +30,9 @@ class ResidualCBlock(nn.Module, EmbLayer):
         final_norm=True,
         emb_dim: int = 0,
         split_dim: bool = False,
-        resZero=True,
-        coordconv=False,
+        resZero: Union[bool, float] = True,
+        coordconv: bool = False,
+        checkpointing: bool = False,
     ):
         """
         Convolutions from features[0]->features[1]->...->features[-1] with residual connection
@@ -62,9 +64,21 @@ class ResidualCBlock(nn.Module, EmbLayer):
             nn.init.zeros_(self.block[-1].bias)
 
         self.final_activation: Optional[nn.Module] = activation() if final_activation else None
-        self.alpha = nn.Parameter(1e-2 * torch.ones(1)) if resZero else None
 
-    def forward(self, x, emb=None):
+        if isinstance(resZero, bool) and resZero:
+            self.alpha = nn.Parameter(1e-2 * torch.ones(1))
+        elif isinstance(resZero, float) and resZero > 0:
+            self.alpha = nn.Parameter(resZero * torch.ones(1))
+        elif isinstance(resZero, float) and resZero < 0:
+            self.alpha = None
+            with torch.no_grad():
+                self.block[-1].weight *= -resZero
+        else:
+            self.alpha = None
+
+        self.checkpointing = checkpointing
+
+    def _forward(self, x, emb=None):
         ret = self.block(x, emb)
         if self.alpha is not None:
             ret = ret * self.alpha
@@ -75,19 +89,28 @@ class ResidualCBlock(nn.Module, EmbLayer):
             ret = self.final_activation(ret)
         return ret
 
+    def forward(self, x, emb=None):
+        if self.checkpointing:
+            return torch.utils.checkpoint.checkpoint(self._forward, x, emb, use_reentrant=False)
+        return self._forward(x, emb)
+
 
 class SequentialEmb(nn.Sequential, LatEmbLayer):
-    def __init__(self, *args):
+    def __init__(self, *args, checkpointing=False, **kwargs):
         self.need_embeding = {}
         self.need_latent = {}
-        super().__init__(*args)
+        self.any_latent = False
+        self.checkpointing = checkpointing
+        super().__init__(*args, **kwargs)
 
     def add_module(self, name: str, module: torch.nn.Module | None):
         self.need_embeding[name] = isinstance(module, EmbLayer)
-        self.need_latent[name] = isinstance(module, LatLayer)
+        need_latent = isinstance(module, LatLayer)
+        self.need_latent[name] = need_latent
+        self.any_latent = self.any_latent or need_latent
         super().add_module(name, module)
 
-    def forward(self, x, emb=None, hin=None, hout=False):
+    def _forward(self, x, emb=None, hin=None, hout=False):
         for name, module in self._modules.items():
             need_emb = self.need_embeding[name]
             need_h = self.need_latent[name]
@@ -100,6 +123,11 @@ class SequentialEmb(nn.Sequential, LatEmbLayer):
             else:
                 x = module(x)
         return x
+
+    def forward(self, x, emb=None, hin=None, hout=False):
+        if self.checkpointing and not self.any_latent:
+            return torch.utils.checkpoint.checkpoint(self._forward, x, emb, use_reentrant=False)
+        return self._forward(x, emb, hin, hout)
 
 
 class CBlock(SequentialEmb):
@@ -122,6 +150,7 @@ class CBlock(SequentialEmb):
         emb_dim: int = 0,
         split_dim: bool = False,
         coordconv: bool = False,
+        checkpointing: bool = False,
     ):
         """
         Convolutions from features[0]->features[1]->...->features[-1] with activation, optional norm and optional dropout
@@ -181,7 +210,7 @@ class CBlock(SequentialEmb):
                 modules.append(activation())
             if norm and not norm_before_activation and final_norm:
                 modules.append(norm(features[0]))
-        super().__init__(*modules)
+        super().__init__(*modules, checkpointing=checkpointing)
 
     def __add__(self, other):
         new = type(self)(())

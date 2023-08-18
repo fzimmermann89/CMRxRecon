@@ -71,7 +71,8 @@ class Unet(nn.Module):
         downsample_dimensions: Optional[Tuple[Tuple[int, ...], ...]] = None,
         coordconv: Union[Literal["first"], bool, Tuple[Union[Tuple[bool, ...], bool]]] = False,
         latents=False,
-        reszero=True,
+        reszero: Union[bool, float] = True,
+        checkpointing: Union[bool, Tuple[bool, ...]] = False,
     ):
         """
         A mostly vanilla UNet with linear final activation
@@ -149,6 +150,11 @@ class Unet(nn.Module):
         else:
             latents = latents + (False,) * (layer - len(latents) + 1)
         self.latent = False
+
+        if isinstance(checkpointing, bool):
+            checkpointing = (checkpointing,) * (layer + 1)
+        else:
+            checkpointing = checkpointing + (checkpointing[-1],) * (layer - len(checkpointing) + 1)
 
         def latentlayer(lat, ch_in):
             if isinstance(lat, str):
@@ -276,10 +282,10 @@ class Unet(nn.Module):
             if not (reduce_upsampling or skip_add):
                 factor = feature_growth(depth + 1)
             features_dec.append((last + int(factor * last) & ~1,) + (last,) * conv_per_dec_block)
-        net = block(features_enc[-1], coordconv=coordconv[0][-1])
+        net = block(features_enc[-1], coordconv=coordconv[0][-1], checkpointing=checkpointing[-1])
         if (latent := latentlayer(latents[-1], features_enc[-1][-1])) is not None:
             net = SequentialEmb(net, latent)
-        for fenc, fdec, fup, fdown, downsampling, upsampling, coordconv_enc, coordconv_dec, lat in zip(
+        for fenc, fdec, fup, fdown, downsampling, upsampling, coordconv_enc, coordconv_dec, lat, chkpt in zip(
             features_enc[-2::-1],
             features_dec[-2::-1],
             features_enc[-1::-1],
@@ -289,9 +295,12 @@ class Unet(nn.Module):
             coordconv[0][-2::-1],
             coordconv[1][-1::-1],
             latents[-2::-1],
+            checkpointing[-2::-1],
         ):
-            decoder = SequentialEmb(join, block(fdec, groups=groups_dec, emb_dim=emb_dim, coordconv=coordconv_dec))
-            encoder = block(fenc, groups=groups_enc, emb_dim=emb_dim, coordconv=coordconv_enc)
+            decoder = SequentialEmb(
+                join, block(fdec, groups=groups_dec, emb_dim=emb_dim, coordconv=coordconv_dec), checkpointing=chkpt
+            )
+            encoder = block(fenc, groups=groups_enc, emb_dim=emb_dim, coordconv=coordconv_enc, checkpointing=chkpt)
             up = upsampling(fup[-1], fdec[0] if skip_add else fdec[0] - fenc[-1])
             down = downsampling(fenc[-1], fup[0])
             lat = latentlayer(lat, fenc[-1])
@@ -306,6 +315,7 @@ class Unet(nn.Module):
             bias=bias_last,
             activation=None,
             groups=groups_last,
+            checkpointing=checkpointing[0],
         )
         if additional_last_decoder > 0:
             self.last = (
@@ -318,6 +328,7 @@ class Unet(nn.Module):
                     activation=activation,
                     padding_mode="zeros" if padding_mode == "none" else padding_mode,
                     split_dim=half_dim,
+                    checkpointing=checkpointing[0],
                 )
                 + self.last
             )
