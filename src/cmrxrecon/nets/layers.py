@@ -531,8 +531,7 @@ class ScaleAndShift(nn.Module, EmbLayer):
         p = p[(...,) + ((x.ndim - p.ndim) * (None,))]
         if self.shift:
             scale, shift = torch.chunk(p, 2, 1)
-            x = x * (1 + scale)
-            x = x + shift
+            x = film(x, scale, shift)
         else:
             x = x * (1 + p)
         return x
@@ -682,6 +681,21 @@ class LatentMix(nn.Module, LatLayer):
         return xnew
 
 
+@torch.jit.script
+def sigmoidadd(a, b):
+    return torch.sigmoid(a + b)
+
+
+@torch.jit.script
+def tanhadd(a, b):
+    return torch.tanh(a + b)
+
+
+@torch.jit.script
+def film(x, scalem1, shift):
+    return x * (scalem1 + 1) + shift
+
+
 class LatentGU(nn.Module, LatLayer):
     def __init__(self, dim: float, channels_input: int, channels_hidden: Optional[int] = None, film: bool = True):
         super().__init__()
@@ -713,12 +727,26 @@ class LatentGU(nn.Module, LatLayer):
             h = hin.pop(0)
         else:
             h = torch.zeros(x.shape[0], self._channels_hidden, *x.shape[2:], dtype=x.dtype, device=x.device)
-        f = torch.sigmoid(self.x2f(x) + self.h2f(h))
-        c = torch.tanh(self.x2c(x) + self.hf2c(h * f))
-        h_new = h * (1 - f) + c * f
+
+        f, hf = _latent_gu_fused1(self.x2f(x), self.h2f(h), h)
+        h_new = _latent_gu_fused2(self.x2c(x), self.hf2c(hf), h, f, hf)
         b = self.h2b(h_new)
         n = self.h2n(h_new)
-        x_new = x * (n + 1) + b
+        x_new = film(x, n, b)
         if hout is not None:
             hout.append(h_new)
         return x_new
+
+
+@torch.jit.script
+def _latent_gu_fused1(x2f: torch.Tensor, h2f: torch.Tensor, h: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+    f = torch.sigmoid(x2f + h2f)
+    hf = h * f
+    return f, hf
+
+
+@torch.jit.script
+def _latent_gu_fused2(x2c: torch.Tensor, hf2c: torch.Tensor, h: torch.Tensor, f: torch.Tensor, hf: torch.Tensor) -> torch.Tensor:
+    c = torch.tanh(x2c + hf2c)
+    h_new = h - hf + f * c
+    return h_new
