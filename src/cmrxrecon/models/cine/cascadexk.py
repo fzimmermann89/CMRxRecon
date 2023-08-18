@@ -25,40 +25,54 @@ class CNNWrapper(torch.nn.Module):
     include_rss: if True, the rss is appended to the input
     """
 
-    def __init__(self, net: torch.nn.Module, include_rss: bool = True, crop_threshold: float = 0.005):
+    def __init__(self, net: torch.nn.Module, include_rss: bool = True, crop_threshold: float = 0.005, checkpointing=False):
         super().__init__()
         self.net = net
         self.include_rss = include_rss
         self.crop_threshold = crop_threshold
+        self.chkpt = checkpointing
 
-    def forward(self, x: torch.Tensor, *args, x_rss=None, **kwargs) -> tuple[torch.Tensor, torch.Tensor] | torch.Tensor:
-        if self.crop_threshold > 0:
-            crops = crops_by_threshold(x.detach(), [self.crop_threshold])
-            xc = x[crops]
+    def before(self, x: torch.Tensor, x_rss=None, crops=None) -> tuple[torch.Tensor, torch.Tensor] | torch.Tensor:
+        if crops is not None:
+            x_cropped = x[crops]
             if x_rss is not None:
-                x_rss_c = x_rss[(crops[0], *crops[2:])]
+                x_rss_cropped = x_rss[(crops[0], *crops[2:])]
         else:
-            xc = x
-            x_rss_c = x_rss
+            x_cropped = x
+            x_rss_cropped = x_rss
             crops = None
-        xr = c2r(xc)
+
+        xr = c2r(x_cropped)
         net_input = rearrange(xr, "b c z t x y r -> (b z) (r c) t x y")
+
         if self.include_rss:
             if x_rss is None:
-                x_rss_c = rss(xc)
-            x_rss_c = rearrange(x_rss_c, "b z t x y -> (b z) t x y").unsqueeze(1)
-            net_input = torch.cat((net_input, x_rss_c), 1)
-        x_net, h = self.net(net_input, *args, **kwargs)
+                x_rss_cropped = rss(x_cropped)
+            x_rss_cropped = rearrange(x_rss_cropped, "b z t x y -> (b z) t x y").unsqueeze(1)
+            net_input = torch.cat((net_input, x_rss_cropped), 1)
 
-        if crops is not None:
-            x_net = rearrange(x_net, "(b z) (r c) t x y -> b c z t x y r", b=len(x), r=2).contiguous()
-            x_net = r2c(x_net)
-            x_net = uncrop(x_net, x.shape, crops)
-            xout = x + x_net
+        return net_input, xr
+
+    def after_crop(self, x_net: torch.Tensor, x: torch.Tensor, crops: tuple[int, ...] | None) -> torch.Tensor:
+        x_net = rearrange(x_net, "(b z) (r c) t x y -> b c z t x y r", b=len(x), r=2).contiguous()
+        x_net = r2c(x_net)
+        x_net = uncrop(x_net, x.shape, crops)
+        return x + x_net
+
+    def after_nocrop(self, x_net: torch.Tensor, xr: torch.Tensor) -> torch.Tensor:
+        x_net = rearrange(x_net, "(b z) (r c) t x y -> b c z t x y r", b=len(xr), r=2)
+        return r2c(xr + x_net)
+
+    def forward(self, x: torch.Tensor, *args, x_rss=None, **kwargs) -> tuple[torch.Tensor, torch.Tensor] | torch.Tensor:
+        run = lambda f, *args: torch.utils.checkpoint.checkpoint(f, *args, use_reentrant=False) if self.chkpt else f(*args)
+
+        crops = crops_by_threshold(x.detach(), [self.crop_threshold]) if self.crop_threshold > 0 else None
+        net_input, xr = run(self.before, x, x_rss, crops)
+        x_net, h = self.net(net_input, *args, **kwargs)
+        if crops is None:
+            return run(self.after_nocrop, x_net, xr), h
         else:
-            x_net = rearrange(x_net, "(b z) (r c) t x y -> b c z t x y r", b=len(x), r=2)
-            xout = r2c(xr + x_net)
-        return xout, h
+            return run(self.after_crop, x_net, x, crops), h
 
 
 class KCNNWrapper(torch.nn.Module):
@@ -69,14 +83,16 @@ class KCNNWrapper(torch.nn.Module):
 
     def prepare_k0(self, k0):
         if self.input_k0:
-            return torch.fft.fftshift(torch.fft.ifft(k0, dim=-1, norm="ortho"), dim=-2)
+            prepared = torch.fft.fftshift(torch.fft.ifft(k0, dim=-1, norm="ortho"), dim=-2)
+            prepared = rearrange(c2r(prepared), "b c z t x y r-> (b z t) (r c) x y")
+            return prepared
 
     def forward(self, k, *args, prepared_k0=None, **kwargs):
+        k_netinput = rearrange(c2r(torch.fft.fftshift(k, dim=-2)), "b c z t x y r-> (b z t) (r c) x y")
         if prepared_k0 is not None:
-            k_netinput = torch.concat((torch.fft.fftshift(k, dim=-2), prepared_k0), 1)
-        else:
-            k_netinput = torch.fft.fftshift(k, dim=-2)
-        k_netinput = rearrange(c2r(k_netinput), "b c z t x y r-> (b z t) (r c) x y")
+            Nc = k.shape[1]
+            # we need to do this to be compatible with old checkpoints...
+            k_netinput = torch.cat((k_netinput[:, :Nc], prepared_k0[:, :Nc], k_netinput[:, Nc:], prepared_k0[:, Nc:]), dim=1)
         k_net, h = self.net(k_netinput, *args, **kwargs)
         k_net = torch.fft.fftshift(
             rearrange(k_net, "(b z t) (r c) x y -> b c z t x y r", b=k.shape[0], z=k.shape[2], r=2), dim=-3
