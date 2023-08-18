@@ -115,6 +115,8 @@ class CascadeNet(torch.nn.Module):
         lambda_init=1e-6,
         overwrite_k: bool = False,
         emb_slice=False,
+        knet_init=0.01,
+        xnet_init=1,
         **kwargs,
     ):
         super().__init__()
@@ -145,7 +147,8 @@ class CascadeNet(torch.nn.Module):
         with torch.no_grad():
             net.last[0].bias.zero_()
             knet.last[0].bias.zero_()
-            knet.last[0].weight *= 0.01
+            knet.last[0].weight *= knet_init
+            net.last[0].weight *= xnet_init
 
         self.net = CNNWrapper(net, include_rss=input_rss, crop_threshold=crop_threshold)
         self.knet = KCNNWrapper(knet, input_k0=input_k0)
@@ -204,12 +207,14 @@ class CascadeNet(torch.nn.Module):
             xi = x_dc
             xs.append(x_net)
             ks.append(k_net)
+
         if self.overwrite_k:
             kp = torch.fft.fftn(xi, dim=(-2, -1), norm="ortho")
             kp = torch.where(mask > 0.5, k, kp)
             pred = rss(torch.fft.ifftn(kp, dim=(-2, -1), norm="ortho"))
         else:
             pred = rss(xi)
+
         return dict(prediction=pred, rss=x0_rss, xs=xs, ks=ks, x=xi)
 
 
@@ -239,6 +244,8 @@ class CascadeXK(CineModel):
         lambda_init: float = 0.5,
         overwrite_k: bool = False,
         emb_slice=False,
+        knet_init=0.01,
+        xnet_init=1,
         **kwargs,
     ):
         super().__init__()
@@ -293,6 +300,8 @@ class CascadeXK(CineModel):
             lambda_init=lambda_init,
             overwrite_k=overwrite_k,
             emb_slice=emb_slice,
+            xnet_init=xnet_init,
+            knet_init=knet_init,
             **kwargs,
         )
         self.EMANorm = EMA(alpha=0.9, max_iter=100)
@@ -322,7 +331,7 @@ class CascadeXK(CineModel):
         ret = {}
         for k in keys:
             v = self.hparams[k]
-            if isinstance(v, tuple):
+            if isinstance(v, (tuple, list)):
                 v = v[self.trainer.global_step >= self.trainer.max_steps * self.hparams.phase2_pct]
             ret[k] = v
         return ret
@@ -479,5 +488,108 @@ class CascadeXKv2(CascadeXK):
             unet_args=unet_args,
             k_unet_args=k_unet_args,
             emb_slice=emb_slice,
+            **kwargs,
+        )
+
+
+class CascadeXKv3(CascadeXK):
+    def __init__(
+        self,
+        input_rss=True,
+        input_k0=True,
+        lr=1e-3,
+        weight_decay=1e-4,
+        schedule=True,
+        Nc: int = 10,
+        T: int = 3,
+        embed_dim=192,
+        crop_threshold: float = 0.000,
+        phase2_pct: float = 0.3,
+        l2_weight: tuple[float, float] | float = (0.1, 0.5),
+        ssim_weight: tuple[float, float] | float = (0.0, 0.4),
+        greedy_weight: tuple[float, float] | float = 0.0,
+        l1_weight: tuple[float, float] | float = (0.3, 0.5),
+        charbonnier_weight: tuple[float, float] | float = 0.0,
+        max_weight: tuple[float, float] | float = (1e-4, 1e-3),
+        l1_coilwise_weight: tuple[float, float] | float = (2.0, 0.0),
+        l2_coilwise_weight: tuple[float, float] | float = (2.0, 0.5),
+        l2_k_weight: tuple[float, float] | float = (0.4, 0.05),
+        greedy_coilwise_weight: tuple[float, float] | float = (0.6, 0.2),
+        lambda_init: float = 0.5,
+        overwrite_k: bool = False,
+        emb_slice=True,
+        xnet_init=0.1,
+        knet_init=0.1,
+        **kwargs,
+    ):
+        unet_args = dict(
+            dim=2.5,
+            layer=3,
+            filters=48,
+            padding_mode="zeros",
+            residual="inner",
+            latents=(False, "film_8", "film_16", "film_32"),
+            norm="group16",
+            feature_growth=(1, 1.667, 1.6, 2, 1, 1),
+            activation="silu",
+            change_filters_last=False,
+            downsample_dimensions=((-1, -2), (-1, -2, -3), (-1, -2, -3), (-1, -2, -3), (-1, -2, -3), (-1, -2, -3)),
+            up_mode="linear",
+            coordconv=(True, False),
+            reszero=-0.5,
+            checkpointing=(True, False, False),
+        )
+
+        k_unet_args = dict(
+            dim=2,
+            filters=64,
+            layer=2,
+            padding_mode="zeros",
+            feature_growth=(1.0, 1.25, 1.6),
+            latents=(False, "film_8", "film_16"),
+            conv_per_enc_block=2,
+            conv_per_dec_block=2,
+            downsample_dimensions=((-2,), (-1, -2)),
+            change_filters_last=False,
+            up_mode="linear_reduce",
+            residual="inner",
+            coordconv=(True, False),
+            reszero=-0.5,
+            norm="group16",
+            activation="silu",
+            checkpointing=(True, True, False),
+        )
+
+        unet_args.update(kwargs.pop("unet_args", {}))
+        k_unet_args.update(kwargs.pop("k_unet_args", {}))
+
+        super().__init__(
+            input_rss=input_rss,
+            input_k0=input_k0,
+            lr=lr,
+            weight_decay=weight_decay,
+            schedule=schedule,
+            Nc=Nc,
+            T=T,
+            embed_dim=embed_dim,
+            crop_threshold=crop_threshold,
+            phase2_pct=phase2_pct,
+            l2_weight=l2_weight,
+            ssim_weight=ssim_weight,
+            greedy_weight=greedy_weight,
+            l1_weight=l1_weight,
+            charbonnier_weight=charbonnier_weight,
+            max_weight=max_weight,
+            l1_coilwise_weight=l1_coilwise_weight,
+            l2_coilwise_weight=l2_coilwise_weight,
+            l2_k_weight=l2_k_weight,
+            greedy_coilwise_weight=greedy_coilwise_weight,
+            lambda_init=lambda_init,
+            overwrite_k=overwrite_k,
+            unet_args=unet_args,
+            k_unet_args=k_unet_args,
+            emb_slice=emb_slice,
+            xnet_init=xnet_init,
+            knet_init=knet_init,
             **kwargs,
         )
