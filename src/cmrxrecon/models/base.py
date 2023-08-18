@@ -66,6 +66,8 @@ class ValidationMixin(ABC):
                 for logger in self.loggers:
                     if isinstance(logger, NeptuneLogger):
                         logdata = data[(data.ndim - 2) * (-1,)]
+                        scalemin, scalemax = kwargs.get("vmin", 0), kwargs.get("vmax", 1)
+                        logdata = np.clip((logdata - scalemin) / (scalemax - scalemin), 0, 1)
                         logger.experiment["val/" + name].log(neptuneFile.as_image(logdata))
                         break
                 else:
