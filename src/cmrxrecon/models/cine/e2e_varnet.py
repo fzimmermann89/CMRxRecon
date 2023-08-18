@@ -1,11 +1,11 @@
 import torch
 import torch.nn as nn
 from . import CineModel
-from src.cmrxrecon.nets.unet import Unet
-from src.cmrxrecon.models.utils.csm import CSM_Sriram
-from src.cmrxrecon.models.utils.encoding import Dyn2DCartEncObj
+from cmrxrecon.nets.unet import Unet
+from cmrxrecon.models.utils.csm import CSM_Sriram
+from cmrxrecon.models.utils.encoding import Dyn2DCartEncObj
 from einops import rearrange
-
+from cmrxrecon.models.utils.ssim import ssim
 from neptune.new.types import File as neptuneFile
 from pytorch_lightning.loggers.neptune import NeptuneLogger
 
@@ -103,15 +103,26 @@ class _E2EVarNet(nn.Module):
         return p_x, p_k, p_csm, xrss
 
 
+def combined_loss(prediction, gt):
+    l1 = nn.functional.l1_loss(prediction, gt)
+    gtm = gt.amax(dim=(-1, -2), keepdim=True)
+    pm = prediction.amax(dim=(-1, -2), keepdim=True)
+    l2 = nn.functional.mse_loss(prediction / pm.detach(), gt / gtm.detach())
+    ssim_loss = -ssim(prediction, gt)
+    max_loss = nn.functional.mse_loss(pm, gtm)
+    loss = 0.5 * l1 + 0.2 * l2 + 0.3 * ssim_loss + 1e-3 * max_loss
+    return loss
+
+
 class E2EVarNet(CineModel):
     def __init__(
         self,
         T: int = 4,
-        lr: float = 3e-4,
-        weight_decay: float = 0.0,
-        schedule: bool = False,
+        lr: float = 6e-4,
+        weight_decay: float = 1e-4,
+        schedule: bool = True,
         loss_fct: str = "l1",
-        normfactor: float = 1e4,
+        normfactor: float = 5e3,
         img_unet_hparams: tuple[int, int, int] = (4, 2, 32),
         csm_unet_hparams: tuple[int, int, int] = (3, 2, 32),
     ):
@@ -124,6 +135,10 @@ class E2EVarNet(CineModel):
             self.loss_fct = nn.MSELoss()
         elif loss_fct == "l1":
             self.loss_fct = nn.L1Loss()
+        elif loss_fct == "comb":
+            self.loss_fct = combined_loss
+        else:
+            raise NotImplementedError(f"loss function {loss_fct} not implemented")
 
     def forward(self, k: torch.Tensor, mask: torch.Tensor, **other) -> dict:
         p_x, p_k, p_csm, xrss = self.net(k * self.normfactor, mask)
