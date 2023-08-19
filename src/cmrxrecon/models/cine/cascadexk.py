@@ -537,7 +537,7 @@ class CascadeXKv3(CascadeXK):
             up_mode="linear",
             coordconv=(True, False),
             reszero=-0.5,
-            checkpointing=(True, False, False),
+            checkpointing=False,
         )
 
         k_unet_args = dict(
@@ -557,7 +557,7 @@ class CascadeXKv3(CascadeXK):
             reszero=-0.5,
             norm="group16",
             activation="silu",
-            checkpointing=(True, True, False),
+            checkpointing=(True, False, False),
         )
 
         unet_args.update(kwargs.pop("unet_args", {}))
