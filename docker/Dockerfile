@@ -46,7 +46,8 @@ RUN micromamba create -qy -n base -f /app/env.yaml \
 # Install the application.
 COPY --chown=user  src /app/src
 COPY --chown=user  pyproject.toml /app/
-COPY --chown=user  submission.py /app/
+COPY --chown=user  *.py /app/
+COPY --chown=user  submission.sh /app/
 COPY --chown=user  LICENSE /app/
 COPY --chown=user  README /app/
 COPY --chown=user  pretrained /app/pretrained
@@ -56,6 +57,6 @@ RUN pip install -e /app --verbose
 # Fix for https://github.com/pytorch/pytorch/issues/97041
 RUN ln -s "$CONDA_PREFIX/lib/libnvrtc.so.11.8.89" "$CONDA_PREFIX/lib/libnvrtc.so"
 
-# Set the default command to python3.
-ENTRYPOINT ["python3", "submission.py"]
+# Set the default command.
+ENTRYPOINT ["/app/submission.sh"]
 
