@@ -16,6 +16,7 @@ class CineAugment:
         p_shuffle_coils: float = 0.2,
         p_phase: float = 0.2,
         flip_view: bool = False,
+        std_amp: float = 0.0,
     ):
         """
         Augmentations for cine data
@@ -26,6 +27,7 @@ class CineAugment:
         self.p_phase = p_phase
         self.p_shuffle_coils = p_shuffle_coils
         self.flip_view = flip_view
+        self.std_amp = std_amp
 
     def __call__(self, sample):
         k = sample["k"]
@@ -95,6 +97,12 @@ class CineAugment:
             if csm is not None:
                 csm = csm[..., shuffle, :, :, :]
             shuffled = 1
+
+        if self.std_amp > 0:
+            factor = 1 + self.std_amp * torch.randn(1).clip_(-2, 2)
+            k = k * factor
+            if gt is not None:
+                gt = gt * factor
 
         augmentinfo = torch.tensor([flippedx, flippedy, flippedz, flippedt, shuffled, phase])
         sample["k"] = k.resolve_conj().contiguous()

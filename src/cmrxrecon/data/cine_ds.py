@@ -267,8 +267,12 @@ class CineSelfSupervisedDataDS(Dataset):
         Order of Axes:
          (Coils , Slice/view, Time, Phase Enc. (undersampled), Frequency Enc. (fully sampled))
         """
+
         if isinstance(path, (str, Path)):
             path = [Path(path)]
+        if return_csm:
+            raise NotImplementedError("return_csm not implemented")
+
         self.filenames = sorted(sum([list(Path(p).rglob("P*.h5")) for p in path], []))
         self.shapes = [(h5py.File(fn)["k"]).shape for fn in self.filenames]
         self.accumslices = np.cumsum(np.array([s[0] for s in self.shapes]))
@@ -283,6 +287,7 @@ class CineSelfSupervisedDataDS(Dataset):
                 p_shuffle_coils=0.2,
                 p_phase=0.2,
                 flip_view=False,
+                std_amp=0.05,
             )
         else:
             self.augments = lambda x: x
