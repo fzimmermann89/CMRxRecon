@@ -5,4 +5,10 @@ from .cascade import Cascade
 from .cascadexk import CascadeXK
 from .cascadexk import CascadeXKv2
 from .cascadexk import CascadeXKv3
+from .cascadexk import CascadeXKv4
+from .cascadexk import CascadeXKv5
+from .cascadexk import CascadeXKv6
+from .cascadexk import CascadeXKv7
+from .cascadexk import CascadeXKv8
+from .cascadexk_new import CascadeXKNew
 from .e2e_varnet import E2EVarNet
