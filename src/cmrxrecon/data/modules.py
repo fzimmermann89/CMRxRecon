@@ -31,6 +31,7 @@ class CineData(pl.LightningDataModule):
         acceleration: tuple[int, ...] = (4, 8, 10),
         return_csm: bool = False,
         return_kfull: bool = False,
+        return_kfull_ift_fs: bool = False,
         test_data_dir: Optional[str] = "files/MultiCoil/Cine/ValidationSet",
         val_acceleration: tuple[int, ...] | None = None,
     ):
@@ -66,6 +67,7 @@ class CineData(pl.LightningDataModule):
         self.singleslice = singleslice
         self.return_csm = return_csm
         self.return_kfull = return_kfull
+        self.return_kfull_ift_fs = return_kfull_ift_fs
         self.kwargs = dict(
             center_lines=center_lines,
             singleslice=singleslice,
@@ -92,6 +94,7 @@ class CineData(pl.LightningDataModule):
                     path,
                     return_csm=return_csm,
                     return_kfull=return_kfull,
+                    return_kfull_ift_fs=return_kfull_ift_fs,
                     random_acceleration=random_acceleration,
                     augments=augments,
                     acceleration=acceleration,

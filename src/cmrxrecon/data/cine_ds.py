@@ -22,6 +22,7 @@ class CineDataDS(Dataset):
         return_csm: bool = False,
         augments: bool = False,
         return_kfull: bool = False,
+        return_kfull_ift_fs: bool = False,
     ):
         """
         A Cine Dataset
@@ -33,6 +34,7 @@ class CineDataDS(Dataset):
         return_csm: return coil sensitivity maps
         augments: augment data
         return_kfull: return fully sampled k space data
+        return_kfull_ift_fs: return kfull as data after ifft along fully sampled dimension
 
         A sample consists of a dict with
             - k: undersampled k-data (shifted, k=0 is on the corner)
@@ -57,6 +59,7 @@ class CineDataDS(Dataset):
         self.center_lines = center_lines
         self.return_csm = return_csm
         self.return_kfull = return_kfull
+        self.return_kfull_ift_fs = return_kfull_ift_fs
 
         if augments:
             self.augments: Callable = CineAugment(
@@ -98,7 +101,7 @@ class CineDataDS(Dataset):
         with h5py.File(self.filenames[filenr], "r") as file:
             lines = file["k"].shape[-5]
             mask = create_mask(lines, self.center_lines, acceleration, offset)
-            if self.return_kfull:
+            if self.return_kfull or self.return_kfull_ift_fs:
                 k = torch.as_tensor(np.array(file["k"][selection]))
                 gt = None
             else:
@@ -124,13 +127,19 @@ class CineDataDS(Dataset):
         if self.return_csm:
             csm = torch.view_as_complex(torch.as_tensor(csm)).swapaxes(0, 1) if self.return_csm else None
             ret["csm"] = csm
+
         ret = self.augments(ret)
-        if self.return_kfull:
-            ret["kfull"] = ret["k"]
-            ret["k"] = ret["k"] * mask
-            xfull = torch.fft.ifft2(ret["kfull"], norm="ortho")
-            # ret["xfull"] = xfull
+
+        if self.return_kfull or self.return_kfull_ift_fs:
+            kfull = ret.pop("k")
+            ret["k"] = kfull * mask
+            xfull = torch.fft.ifft2(kfull, norm="ortho")
             ret["gt"] = rss(xfull, 0)
+        if self.return_kfull_ift_fs:
+            ret["kfull_ift_fs"] = torch.fft.ifft(kfull, norm="ortho", dim=-1)
+        if self.return_kfull:
+            ret["kfull"] = kfull
+
         return ret
 
 
