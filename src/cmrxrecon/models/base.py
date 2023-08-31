@@ -4,6 +4,7 @@ import torch
 import pytorch_lightning as pl
 from neptune.new.types import File as neptuneFile
 from pytorch_lightning.loggers.neptune import NeptuneLogger
+from pytorch_lightning.loggers.csv_logs import CSVLogger
 from cmrxrecon.models.utils.ssim import ssim
 import matplotlib.pyplot as plt
 import random, string
@@ -37,17 +38,23 @@ class ValidationMixin(ABC):
         ssim_value = ssim(gt_m, pred_m)
         nmse = torch.nn.functional.mse_loss(gt_m, pred_m) / torch.nn.functional.mse_loss(gt_m, torch.zeros_like(gt))
 
+        acceleration = int(batch["acceleration"].item())
+        axis_int = int(batch["axis"].item())
+        axis = ("lax", "sax")[axis_int]
+        self.log("axis", float(axis_int), on_step=True, on_epoch=False, prog_bar=False, logger=True)
+        self.log("acceleration", float(acceleration), on_step=True, on_epoch=False, prog_bar=False, logger=True)
+
         self.log("val_advantage", (rss_loss - loss) / rss_loss, on_step=True, on_epoch=True, prog_bar=True, logger=True)
         self.log("val_loss", loss, on_step=True, on_epoch=True, prog_bar=False, logger=True)
-        self.log("val_ssim", ssim_value, on_step=False, on_epoch=True, prog_bar=True, logger=True)
-        self.log("val_nmse", nmse, on_step=False, on_epoch=True, prog_bar=False, logger=True)
+        self.log("val_ssim", ssim_value, on_step=True, on_epoch=True, prog_bar=True, logger=True)
+        self.log("val_nmse", nmse, on_step=True, on_epoch=True, prog_bar=False, logger=True)
+
         if batch_idx == 0:
-            acceleration = int(batch["acceleration"].item())
-            axis = ("lax", "sax")[int(batch["axis"].item())]
             scalemin, scalemax = gt.min().item(), gt.max().item()
 
-            rndpath = Path(
-                f"{self.__class__.__name__}_Acc{acceleration}_{axis}_{datetime.now().strftime('%m%d%H%M')}_{''.join(random.choices(string.ascii_uppercase + string.digits, k=4))}"
+            rndpath = (
+                Path("val")
+                / f"{self.__class__.__name__}_Acc{acceleration}_{axis}_{datetime.now().strftime('%m%d%H%M')}_{''.join(random.choices(string.ascii_uppercase + string.digits, k=4))}"
             )
 
             def scale(data):
@@ -69,19 +76,25 @@ class ValidationMixin(ABC):
                         scalemin, scalemax = kwargs.get("vmin", 0), kwargs.get("vmax", 1)
                         logdata = np.clip((logdata - scalemin) / (scalemax - scalemin), 0, 1)
                         logger.experiment["val/" + name].log(neptuneFile.as_image(logdata))
+                        return
+                    if isinstance(logger, CSVLogger):
+                        outpath = Path(logger.log_dir)
                         break
                 else:
                     rndpath.mkdir(exist_ok=True)
-                    if isinstance(data, (torch.Tensor, np.ndarray)):
-                        np.save(str(rndpath / name) + ".npy", data)
-                    if isinstance(data, plt.Figure):
-                        f = data
-                    else:
-                        f = plot(data, **kwargs)
-                    imgfilename = str(rndpath / name) + ".png"
-                    f.savefig(imgfilename)
-                    plt.close(f)
-                    print("no neptune logger. saved as", imgfilename)
+                    outpath = rndpath
+
+                if isinstance(data, (torch.Tensor, np.ndarray)):
+                    np.save(str(outpath / name) + ".npy", data)
+                if isinstance(data, plt.Figure):
+                    f = data
+                else:
+                    f = plot(data, **kwargs)
+
+                imgfilename = str(outpath / name) + ".png"
+                f.savefig(imgfilename)
+                plt.close(f)
+                print("saved as", imgfilename)
 
             gt_img = scale(gt)
             pred_img = scale(prediction)

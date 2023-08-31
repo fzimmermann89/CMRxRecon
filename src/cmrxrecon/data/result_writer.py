@@ -1,3 +1,4 @@
+from calendar import c
 import time
 import pytorch_lightning as pl
 from pytorch_lightning.callbacks import Callback
@@ -24,7 +25,9 @@ def create_mat_file(path):
         h5py.File(path, "w", userblock_size=512).close()
     with open(path, "r+b") as f:
         f.seek(0)
-        f.write("MATLAB 7.3 MAT-file, Platform: GLNXA64, Created on: Sun Jan  1 00:00:00 2023 HDF5 schema 1.00 .".encode("ascii"))
+        f.write(
+            "MATLAB 7.3 MAT-file, Platform: GLNXA64, Created on: Sun Jan  1 00:00:00 2023 HDF5 schema 1.00 .".encode("ascii")
+        )
         f.seek(124)
         f.write(b"\x00\x02IM")
 
@@ -32,16 +35,25 @@ def create_mat_file(path):
 class OnlineValidationWriter(Callback):
     def on_test_start(self, trainer, pl_module) -> None:
         self.tmpdir = tempfile.mkdtemp()
+        if trainer.checkpoint_callback.dirpath:
+            self.path = Path(trainer.checkpoint_callback.dirpath).parent
+        elif trainer.log_dir:
+            self.path = Path(trainer.log_dir)
+        else:
+            self.path = Path(".")
 
     def on_predict_start(self, trainer, pl_module) -> None:
         self.tmpdir = tempfile.mkdtemp()
+        self.path = Path(".")
 
     def create_zip(self, modelname, mode="test"):
         timestamp = time.strftime("%Y%m%d_%H%M%S")
+
         filename = f"MultiCoil_{mode}_{modelname}_{timestamp}"
-        shutil.make_archive(filename, "zip", self.tmpdir)
+        shutil.make_archive(str(self.path / filename), "zip", self.tmpdir)
         shutil.rmtree(self.tmpdir)
-        return (Path(".") / (filename + ".zip")).absolute()
+
+        return (self.path / (filename + ".zip")).absolute()
 
     def on_predict_end(self, trainer, pl_module) -> None:
         modelname = pl_module.__class__.__name__
@@ -80,7 +92,12 @@ class OnlineValidationWriter(Callback):
                 currentslices = tuple(save_slices)
                 data = data
                 # take instead of indexing to avoid collapsing dimensions
-                data = data.take(to_keep_t, 0).take(idx_z, 1).take(cropslice(sy, round(sy / 2)), 2).take(cropslice(sx, round(sx / 3)), 3)
+                data = (
+                    data.take(to_keep_t, 0)
+                    .take(idx_z, 1)
+                    .take(cropslice(sy, round(sy / 2)), 2)
+                    .take(cropslice(sx, round(sx / 3)), 3)
+                )
                 shape = [len(to_keep_t), len(to_keep_z), round(sy / 2), round(sx / 3)]
 
             # swap order of axis according to error messages of validation script

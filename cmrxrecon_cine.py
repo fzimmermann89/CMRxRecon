@@ -1,4 +1,5 @@
 import torch
+import os.path
 from pathlib import Path
 from jsonargparse import lazy_instance
 from pytorch_lightning import Callback
@@ -24,6 +25,15 @@ class LogChkptPath(Callback):
 class CLI(LightningCLI):
     def before_instantiate_classes(self) -> None:
         config = getattr(self.config, self.subcommand)
+        if "ckpt_path" in config:
+            ckpt_path = config["ckpt_path"]
+            if ckpt_path is not None and os.path.isdir(ckpt_path):
+                chkpt = max(Path(ckpt_path).rglob("*.ckpt"), key=os.path.getmtime)
+                config["ckpt_path"] = str(chkpt)
+            elif ckpt_path == "latest" and "config" in config and len(config["config"]) > 0:
+                chkpt = max(Path(config["config"][0]).parent.rglob("*.ckpt"), key=os.path.getmtime)
+                config["ckpt_path"] = str(chkpt)
+
         if self.subcommand in ["fit"]:
             # logging only for certain subcommands
             neptunelogger = {
@@ -38,6 +48,19 @@ class CLI(LightningCLI):
                 "init_args": dict(save_dir="."),
             }
             config.trainer.logger = [tensorboardlogger, neptunelogger]
+        elif self.subcommand in ["validate", "test"] and "ckpt_path" in config:
+            chkpath = Path(config["ckpt_path"])
+            csvlogger = {
+                "class_path": "CSVLogger",
+                "init_args": dict(
+                    save_dir=str(chkpath.parent),
+                    name="validation",
+                    version=str(chkpath.stem),
+                ),
+            }
+            config.trainer.logger = [csvlogger]
+            self.save_config_callback = None
+
         else:
             config.trainer.logger = None
             self.save_config_callback = None
