@@ -1,5 +1,5 @@
 from typing import Literal
-from .cine_ds import CineDataDS, CineTestDataDS
+from .cine_ds import CineDataDS, CineSelfSupervisedDataDS, CineTestDataDS
 from .mapping_ds import MappingDataDS
 from torch.utils.data import DataLoader, Dataset
 import torch
@@ -22,6 +22,9 @@ class CineData(pl.LightningDataModule):
     def __init__(
         self,
         data_dir: Optional[str] = "files/MultiCoil/Cine/ProcessedTrainingSet",
+        selfsupervised_data_dir: Optional[str] = "files/MultiCoil/Cine/ValidationSelfSupervised",
+        mode: Literal["supervised", "selfsupervised", "both"] = "supervised",
+        selfsupervised_acceleration: tuple[tuple[int, int], ...] = ((4, 0), (8, 0), (8, 4), (10, 0)),
         axis: tuple[Literal["sax", "lax"], ...] | Literal["sax", "lax"] = "sax",
         batch_size: int = 4,
         augments: bool = False,
@@ -72,12 +75,39 @@ class CineData(pl.LightningDataModule):
             center_lines=center_lines,
             singleslice=singleslice,
         )
+
         unique_accelerations = sorted(set(acceleration))
+
+        if mode in ("both", "selfsupervised") and selfsupervised_data_dir is not None and selfsupervised_data_dir != "":
+            different_sizes = sorted(sum([list((Path(selfsupervised_data_dir) / ax).glob("*_*_*")) for ax in self.axis], []))
+            if not different_sizes:
+                raise ValueError(f"No data found in {Path(selfsupervised_data_dir).absolute()}")
+
+            paths = defaultdict(list)
+            for sizepath in different_sizes:
+                name = sizepath.name
+                if self.singleslice:  # ignore number of slices
+                    name = "_".join(name.split("_")[:-1])
+                paths[name].append(sizepath)
+
+            train_self_supervised_datasets = [
+                CineSelfSupervisedDataDS(
+                    path,
+                    acceleration=selfsupervised_acceleration,
+                    augments=augments,
+                    return_ktarget_ift_fs=return_kfull_ift_fs,
+                    **self.kwargs,
+                )
+                for path in paths.values()
+            ]
+        else:
+            train_self_supervised_datasets = []
+
         if data_dir is not None and data_dir != "":
             different_sizes = sorted(sum([list((Path(self.data_dir) / ax).glob("*_*_*")) for ax in self.axis], []))
-
             if not different_sizes:
                 raise ValueError(f"No data found in {Path(self.data_dir).absolute()}")
+
             val_paths = defaultdict(list)
             paths = defaultdict(list)
             for sizepath in different_sizes:
@@ -88,20 +118,23 @@ class CineData(pl.LightningDataModule):
                     val_paths[name].append(sizepath)
                 else:
                     paths[name].append(sizepath)
+            if mode in ("both", "supervised"):
+                train_supervervised_datasets = [
+                    CineDataDS(
+                        path,
+                        return_csm=return_csm,
+                        return_kfull=return_kfull,
+                        return_kfull_ift_fs=return_kfull_ift_fs,
+                        random_acceleration=random_acceleration,
+                        augments=augments,
+                        acceleration=acceleration,
+                        **self.kwargs,
+                    )
+                    for path in paths.values()
+                ]
+            else:
+                train_supervervised_datasets = []
 
-            datasets = [
-                CineDataDS(
-                    path,
-                    return_csm=return_csm,
-                    return_kfull=return_kfull,
-                    return_kfull_ift_fs=return_kfull_ift_fs,
-                    random_acceleration=random_acceleration,
-                    augments=augments,
-                    acceleration=acceleration,
-                    **self.kwargs,
-                )
-                for path in paths.values()
-            ]
             if val_acceleration is None:
                 val_acceleration = unique_accelerations
 
@@ -110,11 +143,14 @@ class CineData(pl.LightningDataModule):
                 for val_path in sorted(list(val_paths.values()))
                 for acc in val_acceleration
             ]
-            self.train_multidatasets = MultiDataSets(datasets)
+
             self.val_multidatasets = MultiDataSets(val_datasets)
         else:
-            self.train_multidatasets = None
+            train_datasets = []
             self.val_multidatasets = None
+
+        train_datasets = train_self_supervised_datasets + train_supervervised_datasets
+        self.train_multidatasets = MultiDataSets(train_datasets) if len(train_datasets) > 0 else None
         if test_data_dir is not None and test_data_dir != "":
             self.test_dataset = CineTestDataDS(test_data_dir, axis=self.axis, return_csm=self.return_csm)
 

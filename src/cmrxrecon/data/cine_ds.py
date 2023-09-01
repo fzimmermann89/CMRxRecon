@@ -256,6 +256,7 @@ class CineSelfSupervisedDataDS(Dataset):
         center_lines: int = 24,
         return_csm: bool = False,
         augments: bool = True,
+        return_ktarget_ift_fs: bool = True,
     ):
         """
         A Cine Self Supervised Dataset
@@ -288,6 +289,7 @@ class CineSelfSupervisedDataDS(Dataset):
         self.singleslice = singleslice
         self.acceleration = acceleration
         self.center_lines = center_lines
+        self.return_ktarget_ift_fs = return_ktarget_ift_fs
 
         if augments:
             self.augments: Callable = CineAugment(
@@ -318,9 +320,11 @@ class CineSelfSupervisedDataDS(Dataset):
             # return a single slice for each subject
             slicenr = idx - self.accumslices[filenr - 1] if filenr > 0 else idx
             selection = slice(slicenr, slicenr + 1)
+
         else:
             # return all slices for each subject
             selection = slice(None)
+            slicenr = 0
 
         with h5py.File(self.filenames[filenr], "r") as file:
             lines = file["k"].shape[-5]
@@ -328,6 +332,7 @@ class CineSelfSupervisedDataDS(Dataset):
             k_tmp = torch.as_tensor(np.array(file["k"][selection, mask_in]))
             k = torch.zeros(k_tmp.shape[0], lines, *k_tmp.shape[2:], dtype=k_tmp.dtype)
             k[:, mask_in, :, :, :] = k_tmp
+            slicevalue = slicenr / (file["k"].shape[0] - 1)
 
         k = torch.view_as_complex(k).permute((3, 0, 2, 1, 4))
         ret = {"k": k}
@@ -344,10 +349,14 @@ class CineSelfSupervisedDataDS(Dataset):
             **ret,
             "k": k,
             "mask": mask,
-            "k_target": k_target,
             "mask_target": mask_target,
             "acceleration": float(acceleration),
             "offset": float(offset),
             "axis": float("sax" in self.filenames[filenr].name),
+            "slice": slicevalue,
         }
+        if self.return_ktarget_ift_fs:
+            ret["k_target_ift_fs"] = torch.fft.ifft(k_target, norm="ortho", dim=-1)
+        else:
+            ret["k_target"] = k_target
         return ret
