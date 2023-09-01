@@ -234,7 +234,7 @@ class CascadeXKNew(CineModel):
         unet_args = dict(
             dim=2.5,
             layer=3,
-            filters=64,
+            filters=48,
             padding_mode="circular",
             residual="inner",
             latents=(False, "film_16", "film_32", "film_48"),
