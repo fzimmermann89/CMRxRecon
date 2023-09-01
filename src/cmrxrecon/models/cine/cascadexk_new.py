@@ -219,9 +219,12 @@ class CascadeXKNew(CineModel):
         l2_coilwise_weight: tuple[float, float] | float = (2.0, 0.5),
         l2_k_weight: tuple[float, float] | float = (0.3, 0.05),
         greedy_coilwise_weight: tuple[float, float] | float = (0.8, 0.1),
+        ss_weight: tuple[float, float] | float = (5.0, 2.0),
+        greedy_ss_weight: tuple[float, float] | float = (1.0, 0.0),
+        ss_scaling_factor: float = 0.3,
         lambda_init: float = 0.5,
         overwrite_k: bool = False,
-        knet_init=0.05,
+        knet_init=0.01,
         xnet_init=1.0,
         k_scaling: bool = True,
         **kwargs,
@@ -231,7 +234,7 @@ class CascadeXKNew(CineModel):
         unet_args = dict(
             dim=2.5,
             layer=3,
-            filters=48,
+            filters=64,
             padding_mode="circular",
             residual="inner",
             latents=(False, "film_16", "film_32", "film_48"),
@@ -241,7 +244,7 @@ class CascadeXKNew(CineModel):
             change_filters_last=False,
             downsample_dimensions=((-1, -2), (-1, -2, -3), (-1, -2, -3), (-1, -2, -3), (-1, -2, -3), (-1, -2, -3)),
             coordconv=((True, False), False),
-            #  checkpointing=(True, True, False),
+            checkpointing=(True, False),
         )
 
         k_unet_args = dict(
@@ -260,7 +263,7 @@ class CascadeXKNew(CineModel):
             reszero=False,
             norm="group16",
             activation="silu",
-            checkpointing=(True, False, False),
+            checkpointing=(True, False),
         )
 
         unet_args.update(kwargs.pop("unet_args", {}))
@@ -286,7 +289,7 @@ class CascadeXKNew(CineModel):
         self.k_scaling = k_scaling
 
     def forward(self, k: torch.Tensor, mask: torch.Tensor, **other) -> dict:
-        k = k * self.EMANorm.ema_unbiased
+        k = k * torch.nan_to_num(self.EMANorm.ema_unbiased, nan=1000.0)
         ret = self.net(k, mask, **other)
         if not self.training:
             unnorm = 1 / self.EMANorm.ema_unbiased
@@ -305,6 +308,8 @@ class CascadeXKNew(CineModel):
             "l2_coilwise_weight",
             "greedy_coilwise_weight",
             "l2_k_weight",
+            "ss_weight",
+            "greedy_ss_weight",
         ]
 
         ret = {}
@@ -315,17 +320,11 @@ class CascadeXKNew(CineModel):
             ret[k] = v
         return ret
 
-    def training_step(self, batch, batch_idx):
-        gt = batch.pop("gt")
-        norm = self.EMANorm(1 / gt.std())
-        gt *= norm
-
-        gc.collect()
-        torch.cuda.synchronize()
-        ret = self(**batch)
+    def training_step_supervised(self, ret, gt, batch, norm, *args, **kwargs):
         prediction, x_rss = ret["prediction"], ret["rss"]
 
         weights = self.get_weights()
+
         loss = 0.0
         rss_loss = F.mse_loss(x_rss, gt)
         l2_loss = F.mse_loss(prediction, gt)
@@ -381,4 +380,57 @@ class CascadeXKNew(CineModel):
         self.log("train_ssim", ssim_value, on_step=False, on_epoch=True, prog_bar=False, logger=True)
         self.log("rss_loss", rss_loss, on_step=True, on_epoch=True, prog_bar=False, logger=True)
 
+        return loss
+
+    def training_step_selfsupervised(self, ret, norm, batch, *args, **kwargs):
+        weights = self.get_weights()
+        mask = batch["mask_target"].unsqueeze(1)
+        if "k_target_ift_fs" in batch:
+            gt = batch.pop("k_target_ift_fs") * norm
+        else:
+            gt = torch.fft.ifft(batch.pop("k_target"), norm="ortho", dim=-1) * norm
+        if scaling_factor := self.hparams.ss_scaling_factor:
+            f = (torch.fft.fftshift(scaling(gt.shape[-2], scaling_factor))[:, None]).to(gt.device)
+            gt = gt * f
+
+        gt = c2r(torch.masked_select(gt, mask))
+        loss = 0.0
+
+        if w := weights["ss_weight"]:
+            pred = torch.fft.fft2(ret["x"], axis=-2, norm="ortho")
+            if scaling_factor:
+                pred = pred * f
+            pred = c2r(torch.masked_select(pred, mask))
+            ss_loss = F.mse_loss(pred, gt)
+            loss = loss + w * ss_loss
+
+        if w := weights["greedy_ss_weight"] and "ks" in ret:
+            ks = ret["ks"]
+            if scaling_factor:
+                ks = [k * f for k in ks]
+
+            greedy_ss_loss = sum([F.mse_loss(c2r(torch.masked_select(k, mask)), gt) for k in ks])
+            loss = loss + w * greedy_ss_loss
+
+        self.log("train_ss_loss", loss, on_step=True, on_epoch=True, prog_bar=False, logger=True)
+
+        return loss
+
+    def training_step(self, batch, batch_idx):
+        if "gt" in batch:
+            gt = batch.pop("gt")
+            norm = self.EMANorm(1 / gt.std())
+            gt *= norm
+            step = self.training_step_supervised
+        else:
+            norm = torch.nan_to_num(self.EMANorm.ema_unbiased, nan=1000.0)
+            step = self.training_step_selfsupervised
+            gt = None
+
+        gc.collect()
+        torch.cuda.synchronize()
+
+        ret = self(**batch)
+
+        loss = step(ret=ret, gt=gt, batch=batch, norm=norm)
         return loss
