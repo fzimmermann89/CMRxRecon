@@ -37,7 +37,8 @@ class CNNWrapper(torch.nn.Module):
         self.net = net
         self.chkpt = checkpointing
 
-    def before(self, x: torch.Tensor, x_rss=None) -> tuple[torch.Tensor, torch.Tensor] | torch.Tensor:
+    @staticmethod
+    def before(x: torch.Tensor, x_rss=None) -> tuple[torch.Tensor, torch.Tensor] | torch.Tensor:
         xr = c2r(x)
         net_input = rearrange(xr, "b c z t x y r -> (b z) (r c) t x y")
         if x_rss is None:
@@ -46,7 +47,8 @@ class CNNWrapper(torch.nn.Module):
         net_input = torch.cat((net_input, x_rss), 1)
         return net_input, xr
 
-    def after(self, x_net: torch.Tensor, xr: torch.Tensor) -> torch.Tensor:
+    @staticmethod
+    def after(x_net: torch.Tensor, xr: torch.Tensor) -> torch.Tensor:
         x_net = rearrange(x_net, "(b z) (r c) t x y -> b c z t x y r", b=len(xr), r=2)
         return r2c(xr + x_net)
 
@@ -58,35 +60,43 @@ class CNNWrapper(torch.nn.Module):
 
 
 class KCNNWrapper(torch.nn.Module):
-    def __init__(self, net, k_scaling: bool = False):
+    def __init__(self, net, k_scaling_factor: float = 0.0):
         super().__init__()
         self.net = net
-        self.k_scaling = k_scaling
+        self.k_scaling_factor = k_scaling_factor
 
     def prepare_k0(self, k0):
         prepared = torch.fft.fftshift(torch.fft.ifft(k0, dim=-1, norm="ortho"), dim=-2)
         prepared = rearrange(c2r(prepared), "b c z t x y r-> (b z t) (r c) x y")
-        if self.k_scaling:
-            f = scaling(k0.shape[-2]).to(k0.device)[:, None]
+        if self.k_scaling_factor:
+            f = scaling(k0.shape[-2], self.k_scaling_factor).to(k0.device)[:, None]
             prepared = prepared * f
         else:
             f = None
         return prepared, f
 
-    def forward(self, k, *args, prepared_k0, f, **kwargs):
+    @staticmethod
+    def before(k, prepared_k0, f):
         k_netinput = rearrange(c2r(torch.fft.fftshift(k, dim=-2)), "b c z t x y r-> (b z t) (r c) x y")
-        if self.k_scaling:
+        if f is not None:
             k_netinput = k_netinput * f
         k_netinput = torch.cat((k_netinput, prepared_k0), dim=1)
+        return k_netinput
 
-        k_net, h = self.net(k_netinput, *args, **kwargs)
+    @staticmethod
+    def after(k_net: torch.Tensor, k: torch.Tensor, f) -> torch.Tensor:
         k_net = torch.fft.fftshift(
             rearrange(k_net, "(b z t) (r c) x y -> b c z t x y r", b=k.shape[0], z=k.shape[2], r=2), dim=-3
         )
-        if self.k_scaling:
+        if f is not None:
             k_net = k_net * (1 / f[..., None])
-        k_net = r2c(k_net)
-        return k + k_net, h
+        return k + r2c(k_net)
+
+    def forward(self, k, *args, prepared_k0, f, **kwargs):
+        k_netinput = self.before(k, prepared_k0, f)
+        k_net, h = self.net(k_netinput, *args, **kwargs)
+        k_new = self.after(k_net, k, f)
+        return k_new, h
 
 
 class CascadeNet(torch.nn.Module):
@@ -101,7 +111,7 @@ class CascadeNet(torch.nn.Module):
         overwrite_k: bool = False,
         knet_init=0.01,
         xnet_init=1,
-        k_scaling: bool = False,
+        k_scaling_factor: float = 0.0,
         **kwargs,
     ):
         super().__init__()
@@ -136,7 +146,7 @@ class CascadeNet(torch.nn.Module):
             net.last[0].weight *= xnet_init
 
         self.net = CNNWrapper(net)
-        self.knet = KCNNWrapper(knet, k_scaling=k_scaling)
+        self.knet = KCNNWrapper(knet, k_scaling_factor=k_scaling_factor)
 
         self.dc = torch.jit.script(
             MultiCoilDCLayer(Nc, lambda_init=lambda_init, embed_dim=embed_dim // 3, input_nn_k=(True, False))
@@ -217,16 +227,16 @@ class CascadeXKNew(CineModel):
         max_weight: tuple[float, float] | float = (1e-4, 3e-3),
         l1_coilwise_weight: tuple[float, float] | float = (2.0, 0.0),
         l2_coilwise_weight: tuple[float, float] | float = (2.0, 0.5),
-        l2_k_weight: tuple[float, float] | float = (0.3, 0.05),
+        l2_k_weight: tuple[float, float] | float = (0.2, 0.05),
         greedy_coilwise_weight: tuple[float, float] | float = (0.8, 0.1),
-        ss_weight: tuple[float, float] | float = (5.0, 2.0),
-        greedy_ss_weight: tuple[float, float] | float = (1.0, 0.0),
-        ss_scaling_factor: float = 0.3,
+        ss_weight: tuple[float, float] | float = (0.5, 0.2),
+        greedy_ss_weight: tuple[float, float] | float = (0.2, 0.0),
+        k_loss_scaling_factor: float = 0.3,
         lambda_init: float = 0.5,
         overwrite_k: bool = False,
-        knet_init=0.01,
-        xnet_init=1.0,
-        k_scaling: bool = True,
+        knet_init=0.05,
+        xnet_init=0.1,
+        k_scaling_factor: float = 0.5,
         **kwargs,
     ):
         super().__init__()
@@ -245,12 +255,13 @@ class CascadeXKNew(CineModel):
             downsample_dimensions=((-1, -2), (-1, -2, -3), (-1, -2, -3), (-1, -2, -3), (-1, -2, -3), (-1, -2, -3)),
             coordconv=((True, False), False),
             checkpointing=(True, False),
+            reszero=0.1,
         )
 
         k_unet_args = dict(
             dim=2,
             filters=64,
-            layer=1,
+            layer=2,
             feature_growth=(1.0, 1.5, 1.5),
             latents=(False, "film_16", "film_32"),
             conv_per_enc_block=3,
@@ -282,11 +293,10 @@ class CascadeXKNew(CineModel):
             overwrite_k=overwrite_k,
             xnet_init=xnet_init,
             knet_init=knet_init,
-            k_scaling=k_scaling,
+            k_scaling_factor=k_scaling_factor,
             **kwargs,
         )
         self.EMANorm = EMA(alpha=0.9, max_iter=100)
-        self.k_scaling = k_scaling
 
     def forward(self, k: torch.Tensor, mask: torch.Tensor, **other) -> dict:
         k = k * torch.nan_to_num(self.EMANorm.ema_unbiased, nan=1000.0)
@@ -368,8 +378,8 @@ class CascadeXKNew(CineModel):
                     loss = loss + l2gw * greedy_x_cw
 
             if kw and ("ks" in ret):
-                if self.k_scaling:
-                    f = scaling(kfull_ift_fs.shape[-2], 0.5).to(kfull_ift_fs.device)[:, None, None]
+                if scaling_factor := self.hparams.k_loss_scaling_factor:
+                    f = scaling(kfull_ift_fs.shape[-2], scaling_factor).to(kfull_ift_fs.device)[:, None, None]
                     greedy_k = sum([F.mse_loss(f * c2r(kfull_ift_fs), f * c2r(k)) for k in ret["ks"]])
                 else:
                     greedy_k = sum([F.mse_loss(c2r(kfull_ift_fs), c2r(k)) for k in ret["ks"]])
@@ -389,7 +399,7 @@ class CascadeXKNew(CineModel):
             gt = batch.pop("k_target_ift_fs") * norm
         else:
             gt = torch.fft.ifft(batch.pop("k_target"), norm="ortho", dim=-1) * norm
-        if scaling_factor := self.hparams.ss_scaling_factor:
+        if scaling_factor := self.hparams.k_loss_scaling_factor:
             f = (torch.fft.fftshift(scaling(gt.shape[-2], scaling_factor))[:, None]).to(gt.device)
             gt = gt * f
 
@@ -433,4 +443,8 @@ class CascadeXKNew(CineModel):
         ret = self(**batch)
 
         loss = step(ret=ret, gt=gt, batch=batch, norm=norm)
+
+        if loss > 0.5:
+            loss = loss.detach().requires_grad_(True)
+
         return loss
