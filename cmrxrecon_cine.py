@@ -73,7 +73,7 @@ if __name__ == "__main__":
     defaultargs = dict(
         logger=False,
         log_every_n_steps=10,
-        devices=[1],
+        devices=[0],
         accumulate_grad_batches=4,
         check_val_every_n_epoch=None,
         val_check_interval=250,
