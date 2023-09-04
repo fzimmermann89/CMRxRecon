@@ -120,7 +120,7 @@ class CineData(pl.LightningDataModule):
                 else:
                     paths[name].append(sizepath)
             if mode in ("both", "supervised"):
-                train_supervervised_datasets = [
+                train_supervised_datasets = [
                     CineDataDS(
                         path,
                         return_csm=return_csm,
@@ -134,7 +134,7 @@ class CineData(pl.LightningDataModule):
                     for path in paths.values()
                 ]
             else:
-                train_supervervised_datasets = []
+                train_supervised_datasets = []
 
             if val_acceleration is None:
                 val_acceleration = unique_accelerations
@@ -147,11 +147,11 @@ class CineData(pl.LightningDataModule):
 
             self.val_multidatasets = MultiDataSets(val_datasets)
         else:
-            train_datasets = []
+            train_supervised_datasets = []
             train_self_supervised_datasets = []
             self.val_multidatasets = None
 
-        train_datasets = train_self_supervised_datasets + train_supervervised_datasets
+        train_datasets = train_self_supervised_datasets + train_supervised_datasets
         self.train_multidatasets = MultiDataSets(train_datasets) if len(train_datasets) > 0 else None
 
         if test_data_dir is not None and test_data_dir != "":
