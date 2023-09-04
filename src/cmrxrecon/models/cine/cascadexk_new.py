@@ -290,7 +290,6 @@ class CascadeXKNew(CineModel):
             up_mode="linear_reduce",
             residual="inner",
             coordconv=True,
-            reszero=False,
             norm="group16",
             activation="silu",
             checkpointing=(True, False),
