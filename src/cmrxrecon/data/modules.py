@@ -105,8 +105,9 @@ class CineData(pl.LightningDataModule):
 
         if data_dir is not None and data_dir != "":
             different_sizes = sorted(sum([list((Path(self.data_dir) / ax).glob("*_*_*")) for ax in self.axis], []))
+
             if not different_sizes:
-                raise ValueError(f"No data found in {Path(self.data_dir).absolute()}")
+                print(f"No data found in {Path(self.data_dir).absolute()}")
 
             val_paths = defaultdict(list)
             paths = defaultdict(list)
@@ -147,10 +148,12 @@ class CineData(pl.LightningDataModule):
             self.val_multidatasets = MultiDataSets(val_datasets)
         else:
             train_datasets = []
+            train_self_supervised_datasets = []
             self.val_multidatasets = None
 
         train_datasets = train_self_supervised_datasets + train_supervervised_datasets
         self.train_multidatasets = MultiDataSets(train_datasets) if len(train_datasets) > 0 else None
+
         if test_data_dir is not None and test_data_dir != "":
             self.test_dataset = CineTestDataDS(test_data_dir, axis=self.axis, return_csm=self.return_csm)
 
@@ -189,7 +192,7 @@ class CineData(pl.LightningDataModule):
 
     def predict_dataloader(self):
         if self.test_dataset is None:
-            raise ValueError("No test data available")
+            raise ValueError("No predict data available")
         return DataLoader(
             self.test_dataset,
             shuffle=False,
