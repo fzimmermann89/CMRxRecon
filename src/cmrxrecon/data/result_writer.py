@@ -1,4 +1,5 @@
 from calendar import c
+import re
 import time
 import pytorch_lightning as pl
 from pytorch_lightning.callbacks import Callback
@@ -33,39 +34,60 @@ def create_mat_file(path):
 
 
 class OnlineValidationWriter(Callback):
+    def __init__(self, output_dir: str | None = None, resize: bool | None = None, zip: bool | None = None, swap: bool = True):
+        self.path = output_dir
+        self.resize = resize
+        self.tmpdir = None
+        self.zip = zip
+        self.swap = swap
+
     def on_test_start(self, trainer, pl_module) -> None:
-        self.tmpdir = tempfile.mkdtemp()
-        if trainer.checkpoint_callback.dirpath:
-            self.path = Path(trainer.checkpoint_callback.dirpath).parent
-        elif trainer.log_dir:
-            self.path = Path(trainer.log_dir)
-        else:
-            self.path = Path(".")
+        if self.zip is None:
+            self.zip = True
+        if self.zip and self.tmpdir is None:
+            self.tmpdir = tempfile.mkdtemp()
+
+        if self.path is None:
+            if trainer.checkpoint_callback.dirpath:
+                self.path = Path(trainer.checkpoint_callback.dirpath).parent
+            elif trainer.log_dir:
+                self.path = Path(trainer.log_dir)
+            else:
+                self.path = Path(".")
 
     def on_predict_start(self, trainer, pl_module) -> None:
-        self.tmpdir = tempfile.mkdtemp()
-        self.path = Path(".")
+        if self.zip is None:
+            self.zip = False
+        if self.zip and self.tmpdir is None:
+            self.tmpdir = tempfile.mkdtemp()
+        if self.path is None:
+            self.path = Path("./output")
 
-    def create_zip(self, modelname, mode="test"):
+    def create_zip(self, modelname, mode):
         timestamp = time.strftime("%Y%m%d_%H%M%S")
-
         filename = f"MultiCoil_{mode}_{modelname}_{timestamp}"
         shutil.make_archive(str(self.path / filename), "zip", self.tmpdir)
-        shutil.rmtree(self.tmpdir)
-
         return (self.path / (filename + ".zip")).absolute()
 
     def on_predict_end(self, trainer, pl_module) -> None:
         modelname = pl_module.__class__.__name__
-        f = self.create_zip(modelname, mode="predict")
-        print("Predictions written to", f)
+        if self.zip:
+            f = self.create_zip(modelname, mode="predict")
+            print("Predictions written to", f)
+            shutil.rmtree(self.tmpdir)
+        else:
+            print("Predictions written to", self.path)
 
     def on_test_end(self, trainer, pl_module) -> None:
         modelname = pl_module.__class__.__name__
-        f = self.create_zip(modelname, mode="test")
-        print("Predictions written to", f)
+        if self.zip:
+            f = self.create_zip(modelname, mode="test")
+            print("Predictions written to", f)
+            shutil.rmtree(self.tmpdir)
+        else:
+            print("Predictions written to", self.path)
 
-    def write_results(self, outputs, batch, resize=True):
+    def write_results(self, outputs, batch, resize=True, swap=True):
         for output, sample in zip(outputs, batch["sample"]):
             filename, currentslices, shape = sample
 
@@ -99,24 +121,41 @@ class OnlineValidationWriter(Callback):
                     .take(cropslice(sx, round(sx / 3)), 3)
                 )
                 shape = [len(to_keep_t), len(to_keep_z), round(sy / 2), round(sx / 3)]
+            if swap:
+                # swap order of axis according to error messages of validation script
+                shape = shape[::-1]
+                data = data.transpose()
 
-            # swap order of axis according to error messages of validation script
-            shape = shape[::-1]
-            data = data.transpose()
+            if self.zip:
+                path = self.tmpdir
+            else:
+                path = self.path
 
-            path = Path(self.tmpdir, *filename.parts[-6:])
+            path = Path(path, *filename.parts[-6:])
             create_mat_file(path)
             with h5py.File(path, "a") as file:
                 if "img4ranking" not in file:
                     ds = file.create_dataset("img4ranking", shape=shape, dtype=np.float32)
                     ds.attrs["MATLAB_class"] = np.bytes_("single")
-                file["img4ranking"][..., currentslices, :] = data
+                if swap:
+                    file["img4ranking"][..., currentslices, :] = data
+                else:
+                    file["img4ranking"][:, currentslices, ...] = data
 
     def on_test_batch_end(self, trainer, pl_module, outputs, batch, batch_idx, dataloader_idx=0) -> None:
-        self.write_results(outputs, batch, resize=True)
+        if self.resize is None:
+            resize = True
+        else:
+            resize = self.resize
+
+        self.write_results(outputs, batch, resize=resize, swap=self.swap)
 
     def on_predict_batch_end(self, trainer, pl_module, outputs, batch, batch_idx, dataloader_idx=0) -> None:
-        self.write_results(outputs, batch, resize=False)
+        if self.resize is None:
+            resize = False
+        else:
+            resize = self.resize
+        self.write_results(outputs, batch, resize=resize, swap=self.swap)
 
 
 # def cropslice(oldshape, newshape) -> slice:

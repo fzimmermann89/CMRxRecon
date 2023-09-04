@@ -23,6 +23,9 @@ class LogChkptPath(Callback):
 
 
 class CLI(LightningCLI):
+    def add_arguments_to_parser(self, parser):
+        parser.add_lightning_class_args(OnlineValidationWriter, "output")
+
     def before_instantiate_classes(self) -> None:
         config = getattr(self.config, self.subcommand)
         if "ckpt_path" in config:
@@ -76,7 +79,7 @@ if __name__ == "__main__":
         val_check_interval=250,
         max_steps=10000,
         max_epochs=None,
-        callbacks=[lazy_instance(OnlineValidationWriter), lazy_instance(LogChkptPath)],
+        callbacks=[lazy_instance(LogChkptPath), lazy_instance(OnlineValidationWriter)],
     )
 
     cli = CLI(
