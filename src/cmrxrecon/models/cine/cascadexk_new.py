@@ -637,7 +637,7 @@ class CascadeXKNewv3(CascadeXKNew):
             downsample_dimensions=((-1, -2), (-1, -2, -3), (-1, -2, -3), (-1, -2, -3), (-1, -2, -3), (-1, -2, -3)),
             up_mode="linear",
             coordconv=(True, False),
-            checkpointing=True,  # False,
+            checkpointing=(True, False),
         )
 
         k_unet_args = dict(
@@ -657,7 +657,7 @@ class CascadeXKNewv3(CascadeXKNew):
             reszero=False,
             norm="group16",
             activation="silu",
-            checkpointing=True,  # (True, False),
+            checkpointing=(True, False),
         )
 
         unet_args.update(kwargs.pop("unet_args", {}))
