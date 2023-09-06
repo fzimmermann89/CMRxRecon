@@ -573,6 +573,27 @@ class CascadeXKNewv2(CascadeXKNew):
 
 class CascadeXKNewv3(CascadeXKNew):
     # closer to v5 old
+    def on_before_optimizer_step(self, optimizer):
+        # log gradient norm for last layers
+        self.log(
+            "grad_norm_x_last",
+            self.net.net.net.last[0].weight.grad.norm().item(),
+            on_step=True,
+            on_epoch=True,
+            prog_bar=False,
+            logger=True,
+        )
+        self.log(
+            "grad_norm_k_last",
+            self.net.knet.net.last[0].weight.grad.norm().item(),
+            on_step=True,
+            on_epoch=True,
+            prog_bar=False,
+            logger=True,
+        )
+        # log lr
+        self.log("lr", optimizer.param_groups[0]["lr"], on_step=True, on_epoch=True, prog_bar=False, logger=True)
+
     def __init__(
         self,
         lr=8e-4,
