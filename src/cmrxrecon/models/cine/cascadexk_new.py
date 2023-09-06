@@ -66,6 +66,16 @@ class KCNNWrapper(torch.nn.Module):
         self.k_scaling_factor = k_scaling_factor
 
     def prepare_k0(self, k0):
+        """prepare k0 for the network
+        We need to do the following:
+        - perform ifft along FS dim
+        - fftshift along US dim
+        - reshape to (b z t) (2*c) x y
+        - apply scaling factor
+        returns
+        -------
+        prepared k0, scaling factor
+        """
         prepared = torch.fft.fftshift(torch.fft.ifft(k0, dim=-1, norm="ortho"), dim=-2)
         prepared = rearrange(c2r(prepared), "b c z t x y r-> (b z t) (r c) x y")
         if self.k_scaling_factor:
@@ -77,6 +87,11 @@ class KCNNWrapper(torch.nn.Module):
 
     @staticmethod
     def before(k, prepared_k0, f):
+        """
+        The input has to be in hybrid space, i.e.
+        k space in US dim and image space in FS dim
+        We shift the k space along the US dim to have DC in the center
+        """
         k_netinput = rearrange(c2r(torch.fft.fftshift(k, dim=-2)), "b c z t x y r-> (b z t) (r c) x y")
         if f is not None:
             k_netinput = k_netinput * f
@@ -85,6 +100,7 @@ class KCNNWrapper(torch.nn.Module):
 
     @staticmethod
     def after(k_net: torch.Tensor, k: torch.Tensor, f) -> torch.Tensor:
+        "unshift along US, reshape and residual connection"
         k_net = torch.fft.fftshift(
             rearrange(k_net, "(b z t) (r c) x y -> b c z t x y r", b=k.shape[0], z=k.shape[2], r=2), dim=-3
         )
@@ -93,6 +109,9 @@ class KCNNWrapper(torch.nn.Module):
         return k + r2c(k_net)
 
     def forward(self, k, *args, prepared_k0, f, **kwargs):
+        """
+        input is k space in US dim and image space in FS dim, output is the same
+        """
         k_netinput = self.before(k, prepared_k0, f)
         k_net, h = self.net(k_netinput, *args, **kwargs)
         k_new = self.after(k_net, k, f)
@@ -393,6 +412,9 @@ class CascadeXKNew(CineModel):
         return loss
 
     def training_step_selfsupervised(self, ret, norm, batch, *args, **kwargs):
+        skip = False
+        if skip:
+            return torch.tensor(0.0, device=ret["prediction"].device, requires_grad=True)
         weights = self.get_weights()
         mask = batch["mask_target"].unsqueeze(1)
         if "k_target_ift_fs" in batch:
@@ -510,11 +532,112 @@ class CascadeXKNewv2(CascadeXKNew):
             up_mode="linear_reduce",
             residual="inner",
             coordconv=True,
-            reszero=False,
             norm="group16",
             activation="silu",
             checkpointing=(True, False),
             reszero=0.5,
+        )
+
+        unet_args.update(kwargs.pop("unet_args", {}))
+        k_unet_args.update(kwargs.pop("k_unet_args", {}))
+        super().__init__(
+            lr=lr,
+            weight_decay=weight_decay,
+            schedule=schedule,
+            Nc=Nc,
+            T=T,
+            embed_dim=embed_dim,
+            phase2_pct=phase2_pct,
+            l2_weight=l2_weight,
+            ssim_weight=ssim_weight,
+            greedy_weight=greedy_weight,
+            l1_weight=l1_weight,
+            charbonnier_weight=charbonnier_weight,
+            max_weight=max_weight,
+            l1_coilwise_weight=l1_coilwise_weight,
+            l2_coilwise_weight=l2_coilwise_weight,
+            l2_k_weight=l2_k_weight,
+            greedy_coilwise_weight=greedy_coilwise_weight,
+            lambda_init=lambda_init,
+            overwrite_k=overwrite_k,
+            unet_args=unet_args,
+            k_unet_args=k_unet_args,
+            xnet_init=xnet_init,
+            knet_init=knet_init,
+            ss_weight=ss_weight,
+            greedy_ss_weight=greedy_ss_weight,
+            k_loss_scaling_factor=k_loss_scaling_factor,
+            k_scaling_factor=k_scaling_factor,
+            **kwargs,
+        )
+
+
+class CascadeXKNewv3(CascadeXKNew):
+    # closer to v5 old
+    def __init__(
+        self,
+        lr=8e-4,
+        weight_decay=1e-3,
+        schedule=True,
+        Nc: int = 10,
+        T: int = 3,
+        embed_dim=192,
+        phase2_pct: float = 0.5,
+        l2_weight: tuple[float, float] | float = (0.1, 0.5),
+        ssim_weight: tuple[float, float] | float = (0, 0.4),
+        greedy_weight: tuple[float, float] | float = (0, 0),
+        l1_weight: tuple[float, float] | float = (0.3, 0.6),
+        charbonnier_weight: tuple[float, float] | float = 0.0,
+        max_weight: tuple[float, float] | float = (1e-4, 1e-3),
+        l1_coilwise_weight: tuple[float, float] | float = (2.0, 0.0),
+        l2_coilwise_weight: tuple[float, float] | float = (2.0, 0.5),
+        l2_k_weight: tuple[float, float] | float = (0.2, 0.05),
+        greedy_coilwise_weight: tuple[float, float] | float = (0.8, 0.1),
+        lambda_init: float = 0.5,
+        overwrite_k: bool = False,
+        knet_init=0.01,
+        xnet_init=1,
+        ss_weight: tuple[float, float] | float = (1.0, 0.2),
+        greedy_ss_weight: tuple[float, float] | float = (0.2, 0.0),
+        k_loss_scaling_factor: float = 0.3,
+        k_scaling_factor: float = 0.3,
+        **kwargs,
+    ):
+        unet_args = dict(
+            dim=2.5,
+            layer=3,
+            filters=48,
+            padding_mode="zeros",
+            residual="inner",
+            latents=(False, "film_16", "film_24", "film_32"),
+            norm="group16",
+            feature_growth=(1, 1.667, 2, 1.6, 1, 1),
+            activation="silu",
+            change_filters_last=False,
+            downsample_dimensions=((-1, -2), (-1, -2, -3), (-1, -2, -3), (-1, -2, -3), (-1, -2, -3), (-1, -2, -3)),
+            up_mode="linear",
+            coordconv=(True, False),
+            checkpointing=True,  # False,
+        )
+
+        k_unet_args = dict(
+            dim=2,
+            filters=64,
+            layer=2,
+            padding_mode="zeros",
+            feature_growth=(1.0, 1.25, 1.6),
+            latents=(False, "film_16", "film_24"),
+            conv_per_enc_block=3,
+            conv_per_dec_block=2,
+            downsample_dimensions=((-2,), (-1, -2)),
+            change_filters_last=False,
+            up_mode="linear_reduce",
+            residual="inner",
+            coordconv=True,
+            reszero=False,
+            norm="group16",
+            activation="silu",
+            checkpointing=True,  # (True, False),
         )
 
         unet_args.update(kwargs.pop("unet_args", {}))
