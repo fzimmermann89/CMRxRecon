@@ -30,7 +30,7 @@ class ValidationMixin(ABC):
     def on_validation_epoch_end(self):
         # log lr for all optimizers
         j = 0
-        for optim in self.optimizers():
+        for optim in self.trainer.optimizers:
             for param_group in optim.param_groups:
                 self.log(f"lr_{j}", param_group["lr"], on_step=False, on_epoch=True, prog_bar=False, logger=True)
                 j += 1
