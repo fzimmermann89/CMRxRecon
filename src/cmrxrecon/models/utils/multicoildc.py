@@ -54,7 +54,7 @@ class MultiCoilDCLayer(torch.nn.Module):
             knn = torch.fft.fftn(nn, dim=self.input_ft_dims, norm="ortho")
         lam = self.lambda_proj(lambda_embed)[:, :, None, None, None, None]  # [Nb, Nc, 1, 1, 1, 1]
         mask = mask.unsqueeze(1)  # [Nb, Nc=1, Nz=1, Nz=1, Nu, Nf=1]
-        fk = mask * (1.0 / (1.0 + lam))  # facor for k data, 0 for missing data
+        fk = mask * (1.0 / (1.0 + lam))  # factor for k data, 0 for missing data
         fn = 1 - fk  # factor for knn data
         kdc = fn * knn + fk * k
         if len(self.output_ft_dims) == 0:

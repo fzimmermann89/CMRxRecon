@@ -1,6 +1,6 @@
 from typing import Any, Mapping
 import torch
-from einops import rearrange
+from einops import rearrange, repeat
 from cmrxrecon.nets.unet import Unet
 from cmrxrecon.nets.mlp import MLP
 from typing import *
@@ -15,14 +15,6 @@ import gc
 from cmrxrecon.models.utils.ssim import ssim
 import torch.nn.functional as F
 from torch import view_as_real as c2r, view_as_complex as r2c
-
-
-def scaling(kshape: tuple[int, ...]) -> torch.Tensor:
-    x = torch.arange(-kshape[-1] // 2, kshape[-1] // 2)
-    y = torch.arange(-kshape[-2] // 2, kshape[-2] // 2)[:, None]
-    f = 1 + (x.square() + y.square()).sqrt()
-    f = f * (2 / f.mean())
-    return f
 
 
 class CNNWrapper(torch.nn.Module):
@@ -71,12 +63,15 @@ class CNNWrapper(torch.nn.Module):
         x_net = rearrange(x_net, "(b z) (r c) t x y -> b c z t x y r", b=len(xr), r=2)
         return r2c(xr + x_net)
 
-    def forward(self, x: torch.Tensor, *args, x_rss=None, **kwargs) -> tuple[torch.Tensor, torch.Tensor] | torch.Tensor:
+    def forward(
+        self, x: torch.Tensor, emb: torch.Tensor, *args, x_rss=None, **kwargs
+    ) -> tuple[torch.Tensor, torch.Tensor] | torch.Tensor:
         run = lambda f, *args: torch.utils.checkpoint.checkpoint(f, *args, use_reentrant=False) if self.chkpt else f(*args)
-
+        if (Nz := x.shape[2]) != 1:
+            emb = repeat(emb, "b c ->(b z) c", z=Nz)
         crops = crops_by_threshold(x.detach(), [self.crop_threshold]) if self.crop_threshold > 0 else None
         net_input, xr = run(self.before, x, x_rss, crops)
-        x_net, h = self.net(net_input, *args, **kwargs)
+        x_net, h = self.net(net_input, emb=emb, *args, **kwargs)
         if crops is None:
             return run(self.after_nocrop, x_net, xr), h
         else:
@@ -95,13 +90,14 @@ class KCNNWrapper(torch.nn.Module):
             prepared = rearrange(c2r(prepared), "b c z t x y r-> (b z t) (r c) x y")
             return prepared
 
-    def forward(self, k, *args, prepared_k0=None, **kwargs):
+    def forward(self, k, emb, *args, prepared_k0=None, **kwargs):
+        emb = repeat(emb, "b c ->(b z t) c", z=k.shape[2], t=k.shape[3])
         k_netinput = rearrange(c2r(torch.fft.fftshift(k, dim=-2)), "b c z t x y r-> (b z t) (r c) x y")
         if prepared_k0 is not None:
             Nc = k.shape[1]
             # we need to do this to be compatible with old checkpoints...
             k_netinput = torch.cat((k_netinput[:, :Nc], prepared_k0[:, :Nc], k_netinput[:, Nc:], prepared_k0[:, Nc:]), dim=1)
-        k_net, h = self.net(k_netinput, *args, **kwargs)
+        k_net, h = self.net(k_netinput, emb=emb, *args, **kwargs)
         k_net = torch.fft.fftshift(
             rearrange(k_net, "(b z t) (r c) x y -> b c z t x y r", b=k.shape[0], z=k.shape[2], r=2), dim=-3
         )
@@ -161,9 +157,7 @@ class CascadeNet(torch.nn.Module):
         self.net = CNNWrapper(net, include_rss=input_rss, crop_threshold=crop_threshold)
         self.knet = KCNNWrapper(knet, input_k0=input_k0)
 
-        self.dc = torch.jit.script(
-            MultiCoilDCLayer(Nc, lambda_init=lambda_init, embed_dim=embed_dim // 3, input_nn_k=(True, False))
-        )
+        self.dc = MultiCoilDCLayer(Nc, lambda_init=lambda_init, embed_dim=embed_dim // 3, input_nn_k=(True, False))
 
         self.embed_augment_channels = 6
         self.embed_axis_channels = 2
@@ -189,7 +183,17 @@ class CascadeNet(torch.nn.Module):
         accelerationinfo = self.embed_acceleration_map(acceleration)
         axis = other.get("axis", torch.zeros(k.shape[0], device=k.device)).float()[:, None]
         axisinfo = torch.cat((axis, 1 - axis), dim=-1)
-        sliceinfo = other.get("slice", torch.zeros(k.shape[0], device=k.device)).float()[:, None] / 10
+
+        if (z_in := k.shape[2]) != 1:
+            k = rearrange(k, "b c z ... -> (b z) c ...").unsqueeze(2)
+            mask = rearrange(mask, "b z ... -> (b z) ...").unsqueeze(1)
+            sliceinfo = (other.get("slice", torch.zeros(k.shape[0], z_in, device=k.device)).float() / 10).T
+            augmentinfo, axisinfo, accelerationinfo = map(
+                lambda c: torch.tile(c, (z_in, 1)), (augmentinfo, axisinfo, accelerationinfo)
+            )
+        else:
+            sliceinfo = other.get("slice", torch.zeros(k.shape[0], device=k.device)).float()[:, None] / 10
+
         if self.embed_slice_channels:
             static_info = torch.cat((augmentinfo, axisinfo, accelerationinfo, sliceinfo), dim=-1)
         else:
@@ -223,6 +227,10 @@ class CascadeNet(torch.nn.Module):
         else:
             pred = rss(xi)
 
+        if z_in != 1:
+            pred = rearrange(pred, "(b z) n ... -> b (z n) ...", z=z_in)
+            xi = rearrange(xi, "(b z) n ... -> b (z n) ...", z=z_in)
+            x0_rss = rearrange(x0_rss, "(b z) n ... -> b (z n) ...", z=z_in)
         return dict(prediction=pred, rss=x0_rss, xs=xs, ks=ks, x=xi)
 
 
@@ -752,7 +760,7 @@ class CascadeXKv5(CascadeXK):
             downsample_dimensions=((-1, -2), (-1, -2, -3), (-1, -2, -3), (-1, -2, -3), (-1, -2, -3), (-1, -2, -3)),
             up_mode="linear",
             coordconv=(True, False),
-            checkpointing=False,
+            checkpointing=True,  # False,
         )
 
         k_unet_args = dict(
@@ -772,7 +780,7 @@ class CascadeXKv5(CascadeXK):
             reszero=False,
             norm="group16",
             activation="silu",
-            checkpointing=(True, False),
+            checkpointing=True,  # (True, False),
         )
 
         unet_args.update(kwargs.pop("unet_args", {}))

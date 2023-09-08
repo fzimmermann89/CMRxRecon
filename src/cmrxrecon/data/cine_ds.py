@@ -96,7 +96,7 @@ class CineDataDS(Dataset):
         else:
             # return all slices for each subject
             selection = slice(None)
-            slicenr = 0
+            slicenr = None
 
         with h5py.File(self.filenames[filenr], "r") as file:
             lines = file["k"].shape[-5]
@@ -111,7 +111,10 @@ class CineDataDS(Dataset):
                 gt = file["sos"][selection]
             if self.return_csm:
                 csm = file["csm"][selection]
-            slicevalue = slicenr / (file["sos"].shape[0] - 1)
+            if slice is not None:
+                slicevale = np.arange(0, file["sos"].shape[0]) / (file["sos"].shape[0] - 1)
+            else:
+                slicevalue = slicenr / (file["sos"].shape[0] - 1)
 
         k = torch.view_as_complex(k).permute((3, 0, 2, 1, 4))
         mask = torch.as_tensor(mask[None, None, :, None])
@@ -148,7 +151,7 @@ class CineTestDataDS(Dataset):
         self,
         path: str | Path | tuple[str | Path, ...],
         axis: str | tuple[str, ...] = ("lax", "sax"),
-        singleslice: bool = True,
+        slicepersample: int = 2,
         return_csm: bool = False,
     ):
         """
@@ -171,10 +174,17 @@ class CineTestDataDS(Dataset):
         if isinstance(axis, str):
             axis = (axis,)
         self.filenames = sorted(sum([list(Path(p).rglob(f"cine_{ax}.mat")) for p in path for ax in axis], []))
-        self.shapes = [self._getdata(fn).shape for fn in self.filenames]
-        self.accumslices = np.cumsum(np.array([s[1] for s in self.shapes]))
+
+        shapes = [self._getdata(fn).shape for fn in self.filenames]
+        slices = np.array([s[1] for s in shapes])
+
+        samples = []
+        for filenumber, slicesinfile in enumerate(slices):
+            for start in range(0, slicesinfile, slicepersample):
+                stop = min(start + slicepersample, slicesinfile)
+                samples.append((filenumber, start, stop))
+        self.samples = samples
         self.return_csm = return_csm
-        self.singleslice = singleslice
 
     @staticmethod
     def _getdata(file: str | Path | h5py.File):
@@ -197,32 +207,25 @@ class CineTestDataDS(Dataset):
         return data
 
     def __len__(self):
-        if self.singleslice:
-            return self.accumslices[-1]
-        else:
-            return len(self.filenames)
+        return len(self.samples)
 
     def __getitem__(self, idx) -> dict[str, Any]:
         if idx >= len(self):
             raise IndexError
 
-        filenr = np.argmax(self.accumslices > idx) if self.singleslice else idx
-        if self.singleslice:
-            # return a single slice for each subject
-            slicenr = idx - self.accumslices[filenr - 1] if filenr > 0 else idx
-            selection = slice(slicenr, slicenr + 1)
-        else:
-            # return all slices for each subject
-            selection = slice(None)
-            slicenr = 0
-
+        filenr, start, stop = self.samples[idx]
         filename = self.filenames[filenr]
 
         with h5py.File(filename, "r") as file:
             data = self._getdata(file)
             shape = [data.shape[i] for i in (2, 1, 0, 3, 4)]
+            selection = slice(start, stop)
+            slicenr = np.arange(start, stop)
             k_data_centered = np.array(data[:, selection]).view(np.complex64)  # (t,z,c,us,fs)
             slicevalue = slicenr / (data.shape[1] - 1)
+            if len(slicevalue) == 1:
+                slicevalue = slicevalue[0]
+
         k_data = self._shift(k_data_centered).transpose((2, 1, 0, 3, 4))  # (c,z,t,us,fs)
         k_data = k_data.astype(np.complex64)
         mask = (~np.isclose(k_data[0, ..., :, :1], 0)).astype(np.float32)
@@ -324,7 +327,7 @@ class CineSelfSupervisedDataDS(Dataset):
         else:
             # return all slices for each subject
             selection = slice(None)
-            slicenr = 0
+            slicenr = None
 
         with h5py.File(self.filenames[filenr], "r") as file:
             lines = file["k"].shape[-5]
@@ -332,7 +335,10 @@ class CineSelfSupervisedDataDS(Dataset):
             k_tmp = torch.as_tensor(np.array(file["k"][selection, mask_in]))
             k = torch.zeros(k_tmp.shape[0], lines, *k_tmp.shape[2:], dtype=k_tmp.dtype)
             k[:, mask_in, :, :, :] = k_tmp
-            slicevalue = slicenr / (file["k"].shape[0] - 1)
+            if slicenr is None:
+                slicevalue = np.arange(0, file["k"].shape[0]) / (file["k"].shape[0] - 1)
+            else:
+                slicevalue = slicenr / (file["k"].shape[0] - 1)
 
         k = torch.view_as_complex(k).permute((3, 0, 2, 1, 4))
         ret = {"k": k}
