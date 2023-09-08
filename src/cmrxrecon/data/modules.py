@@ -155,7 +155,7 @@ class CineData(pl.LightningDataModule):
         self.train_multidatasets = MultiDataSets(train_datasets) if len(train_datasets) > 0 else None
 
         if test_data_dir is not None and test_data_dir != "":
-            self.test_dataset = CineTestDataDS(test_data_dir, axis=self.axis, return_csm=self.return_csm, slicepersample=3)
+            self.test_dataset = CineTestDataDS(test_data_dir, axis=self.axis, return_csm=self.return_csm, slicepersample=2)
 
     def train_dataloader(self):
         if self.train_multidatasets is None:
