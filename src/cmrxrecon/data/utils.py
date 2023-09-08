@@ -32,7 +32,7 @@ class MultiDataSets(Dataset):
 
     def __init__(self, datasets: tuple[Dataset]):
         super().__init__()
-        self.datasets = datasets
+        self.datasets = [d for d in datasets if d is not None and len(d) > 0]
 
     def __getitem__(self, index: tuple[int, tuple[int, ...]]) -> Any:
         return self.datasets[index[0]][index[1]]

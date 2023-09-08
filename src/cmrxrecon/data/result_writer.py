@@ -1,5 +1,4 @@
-from calendar import c
-import re
+from collections import defaultdict
 import time
 import pytorch_lightning as pl
 from pytorch_lightning.callbacks import Callback
@@ -22,8 +21,7 @@ def cropslice(oldshape, newshape) -> slice:
 
 def create_mat_file(path):
     path.parent.mkdir(parents=True, exist_ok=True)
-    if not path.exists():
-        h5py.File(path, "w", userblock_size=512).close()
+    h5py.File(path, "w", userblock_size=512).close()
     with open(path, "r+b") as f:
         f.seek(0)
         f.write(
@@ -40,6 +38,7 @@ class OnlineValidationWriter(Callback):
         self.tmpdir = None
         self.zip = zip
         self.swap = swap
+        self.cache = defaultdict(list)
 
     def on_test_start(self, trainer, pl_module) -> None:
         if self.zip is None:
@@ -112,7 +111,6 @@ class OnlineValidationWriter(Callback):
                 if not idx_z:  # none
                     continue
                 currentslices = tuple(save_slices)
-                data = data
                 # take instead of indexing to avoid collapsing dimensions
                 data = (
                     data.take(to_keep_t, 0)
@@ -121,26 +119,34 @@ class OnlineValidationWriter(Callback):
                     .take(cropslice(sx, round(sx / 3)), 3)
                 )
                 shape = [len(to_keep_t), len(to_keep_z), round(sy / 2), round(sx / 3)]
-            if swap:
-                # swap order of axis according to error messages of validation script
-                shape = shape[::-1]
-                data = data.transpose()
 
-            if self.zip:
-                path = self.tmpdir
-            else:
-                path = self.path
+            self.cache[filename].append((currentslices, data))
 
-            path = Path(path, *filename.parts[-6:])
-            create_mat_file(path)
-            with h5py.File(path, "a") as file:
-                if "img4ranking" not in file:
-                    ds = file.create_dataset("img4ranking", shape=shape, dtype=np.float32)
-                    ds.attrs["MATLAB_class"] = np.bytes_("single")
+            # check if all slices are there and write to disk
+            needed_slices = np.arange(shape[1])
+            existing_slices = [needed_slices[s] for s, _ in self.cache[filename]]
+
+            if set(np.concatenate(existing_slices)) == set(needed_slices):
+                # all slices are there, write to disk
+
+                data = np.empty(shape, dtype=np.float32)
+                for s, current_data in self.cache[filename]:
+                    data[:, s, ...] = current_data
+
                 if swap:
-                    file["img4ranking"][..., currentslices, :] = data
+                    data = data.transpose()
+                    shape = shape[::-1]
+
+                if self.zip:
+                    path = self.tmpdir
                 else:
-                    file["img4ranking"][:, currentslices, ...] = data
+                    path = self.path
+                path = Path(path, *filename.parts[-6:])
+                create_mat_file(path)
+                with h5py.File(path, "a") as file:
+                    ds = file.create_dataset("img4ranking", shape=shape, dtype=np.float32, data=data)
+                    ds.attrs["MATLAB_class"] = np.bytes_("single")
+                del self.cache[filename]
 
     def on_test_batch_end(self, trainer, pl_module, outputs, batch, batch_idx, dataloader_idx=0) -> None:
         if self.resize is None:
