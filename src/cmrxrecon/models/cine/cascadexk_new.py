@@ -692,3 +692,125 @@ class CascadeXKNewv3(CascadeXKNew):
             k_scaling_factor=k_scaling_factor,
             **kwargs,
         )
+
+
+class CascadeXKNewv4(CascadeXKNew):
+    # closer to v1
+    def on_before_optimizer_step(self, optimizer):
+        # log gradient norm for last layers
+        self.log(
+            "grad_norm_x_last",
+            self.net.net.net.last[0].weight.grad.norm().item(),
+            on_step=True,
+            on_epoch=True,
+            prog_bar=False,
+            logger=True,
+        )
+        self.log(
+            "grad_norm_k_last",
+            self.net.knet.net.last[0].weight.grad.norm().item(),
+            on_step=True,
+            on_epoch=True,
+            prog_bar=False,
+            logger=True,
+        )
+        # log lr
+        self.log("lr", optimizer.param_groups[0]["lr"], on_step=True, on_epoch=True, prog_bar=False, logger=True)
+
+    def __init__(
+        self,
+        lr=8e-4,
+        weight_decay=1e-3,
+        schedule=True,
+        Nc: int = 10,
+        T: int = 3,
+        embed_dim=192,
+        phase2_pct: float = 0.5,
+        l2_weight: tuple[float, float] | float = (0.1, 0.5),
+        ssim_weight: tuple[float, float] | float = (0, 0.4),
+        greedy_weight: tuple[float, float] | float = (0, 0),
+        l1_weight: tuple[float, float] | float = (0.3, 0.6),
+        charbonnier_weight: tuple[float, float] | float = 0.0,
+        max_weight: tuple[float, float] | float = (1e-4, 1e-3),
+        l1_coilwise_weight: tuple[float, float] | float = (2.0, 0.0),
+        l2_coilwise_weight: tuple[float, float] | float = (2.0, 0.5),
+        l2_k_weight: tuple[float, float] | float = (0.2, 0.05),
+        greedy_coilwise_weight: tuple[float, float] | float = (0.8, 0.1),
+        lambda_init: float = 0.4,
+        overwrite_k: bool = False,
+        knet_init=0.01,
+        xnet_init=1,
+        ss_weight: tuple[float, float] | float = (1.5, 0.2),
+        greedy_ss_weight: tuple[float, float] | float = (0.2, 0.0),
+        k_loss_scaling_factor: float = 0.3,
+        k_scaling_factor: float = 0.4,
+        **kwargs,
+    ):
+        unet_args = dict(
+            dim=2.5,
+            layer=3,
+            filters=48,
+            padding_mode="circular",
+            residual="inner",
+            latents=(False, "film_16", "film_32", "film_48"),
+            norm="group16",
+            feature_growth=(1, 2, 2, 1.334, 1, 1),
+            activation="silu",
+            change_filters_last=False,
+            downsample_dimensions=((-1, -2), (-1, -2, -3), (-1, -2, -3), (-1, -2, -3), (-1, -2, -3), (-1, -2, -3)),
+            coordconv=((True, False), False),
+            checkpointing=(True, False),
+            reszero=0.05,
+        )
+
+        k_unet_args = dict(
+            dim=2,
+            filters=64,
+            layer=2,
+            feature_growth=(1.0, 1.5, 1.5),
+            latents=(False, "film_16", "film_32"),
+            conv_per_enc_block=3,
+            conv_per_dec_block=3,
+            downsample_dimensions=((-2,), (-1, -2)),
+            change_filters_last=False,
+            up_mode="linear_reduce",
+            residual="inner",
+            coordconv=True,
+            norm="group16",
+            activation="silu",
+            checkpointing=(True, False),
+            reszero=0.5,
+        )
+
+        unet_args.update(kwargs.pop("unet_args", {}))
+        k_unet_args.update(kwargs.pop("k_unet_args", {}))
+        super().__init__(
+            lr=lr,
+            weight_decay=weight_decay,
+            schedule=schedule,
+            Nc=Nc,
+            T=T,
+            embed_dim=embed_dim,
+            phase2_pct=phase2_pct,
+            l2_weight=l2_weight,
+            ssim_weight=ssim_weight,
+            greedy_weight=greedy_weight,
+            l1_weight=l1_weight,
+            charbonnier_weight=charbonnier_weight,
+            max_weight=max_weight,
+            l1_coilwise_weight=l1_coilwise_weight,
+            l2_coilwise_weight=l2_coilwise_weight,
+            l2_k_weight=l2_k_weight,
+            greedy_coilwise_weight=greedy_coilwise_weight,
+            lambda_init=lambda_init,
+            overwrite_k=overwrite_k,
+            unet_args=unet_args,
+            k_unet_args=k_unet_args,
+            xnet_init=xnet_init,
+            knet_init=knet_init,
+            ss_weight=ss_weight,
+            greedy_ss_weight=greedy_ss_weight,
+            k_loss_scaling_factor=k_loss_scaling_factor,
+            k_scaling_factor=k_scaling_factor,
+            **kwargs,
+        )
