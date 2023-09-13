@@ -79,7 +79,7 @@ if __name__ == "__main__":
         val_check_interval=250,
         max_steps=10000,
         max_epochs=None,
-        callbacks=[lazy_instance(LogChkptPath), lazy_instance(OnlineValidationWriter)],
+        callbacks=[lazy_instance(LogChkptPath)],  # lazy_instance(OnlineValidationWriter)
     )
 
     cli = CLI(

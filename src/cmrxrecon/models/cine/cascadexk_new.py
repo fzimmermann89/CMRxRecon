@@ -36,25 +36,30 @@ class CNNWrapper(torch.nn.Module):
         super().__init__()
         self.net = net
         self.chkpt = checkpointing
+        self.min_t = 4
 
     @staticmethod
-    def before(x: torch.Tensor, x_rss=None) -> tuple[torch.Tensor, torch.Tensor] | torch.Tensor:
+    def before(x: torch.Tensor, x_rss=None, min_t=4) -> tuple[torch.Tensor, torch.Tensor] | torch.Tensor:
         xr = c2r(x)
         net_input = rearrange(xr, "b c z t x y r -> (b z) (r c) t x y")
         if x_rss is None:
             x_rss = rss(x)
         x_rss = rearrange(x_rss, "b z t x y -> (b z) t x y").unsqueeze(1)
         net_input = torch.cat((net_input, x_rss), 1)
+        if Nt := net_input.shape[2] < min_t:
+            net_input = torch.nn.functional.pad(net_input, (0, 0, 0, 0, 0, min_t - Nt), mode="replicate")
         return net_input, xr
 
     @staticmethod
     def after(x_net: torch.Tensor, xr: torch.Tensor) -> torch.Tensor:
         x_net = rearrange(x_net, "(b z) (r c) t x y -> b c z t x y r", b=len(xr), r=2)
+        if x_net.shape[3] != (Nt := xr.shape[3]):
+            x_net = x_net[:, :, :, :Nt]
         return r2c(xr + x_net)
 
     def forward(self, x: torch.Tensor, *args, x_rss=None, **kwargs) -> tuple[torch.Tensor, torch.Tensor] | torch.Tensor:
         run = lambda f, *args: torch.utils.checkpoint.checkpoint(f, *args, use_reentrant=False) if self.chkpt else f(*args)
-        net_input, xr = run(self.before, x, x_rss)
+        net_input, xr = run(self.before, x, x_rss, self.min_t)
         x_net, h = self.net(net_input, *args, **kwargs)
         return run(self.after, x_net, xr), h
 
@@ -187,16 +192,19 @@ class CascadeNet(torch.nn.Module):
 
         self.embed_net = MLP([embed_input_channels, embed_dim, embed_dim])
 
+    def conditioning_info(self, other, batchsize, device) -> dict:
+        augmentinfo = other.get("augmentinfo", torch.zeros(batchsize, self.embed_augment_channels, device=device)).float()
+        acceleration = other.get("acceleration", torch.ones(batchsize, device=device)).float()[:, None]
+        accelerationinfo = self.embed_acceleration_map(acceleration)
+        axis = other.get("axis", torch.zeros(batchsize, device=device)).float()[:, None]
+        axisinfo = torch.cat((axis, 1 - axis), dim=-1)
+        sliceinfo = other.get("slice", torch.zeros(batchsize, device=device)).float()[:, None] / 10
+        static_info = torch.cat((augmentinfo, axisinfo, accelerationinfo, sliceinfo), dim=-1)
+        return static_info
+
     def forward(self, k: torch.Tensor, mask: torch.Tensor, **other) -> dict:
         # get all the conditioning information or defaults
-        augmentinfo = other.get("augmentinfo", torch.zeros(k.shape[0], self.embed_augment_channels, device=k.device)).float()
-        acceleration = other.get("acceleration", torch.ones(k.shape[0], device=k.device)).float()[:, None]
-        accelerationinfo = self.embed_acceleration_map(acceleration)
-        axis = other.get("axis", torch.zeros(k.shape[0], device=k.device)).float()[:, None]
-        axisinfo = torch.cat((axis, 1 - axis), dim=-1)
-        sliceinfo = other.get("slice", torch.zeros(k.shape[0], device=k.device)).float()[:, None] / 10
-        static_info = torch.cat((augmentinfo, axisinfo, accelerationinfo, sliceinfo), dim=-1)
-
+        static_info = self.conditioning_info(other, k.shape[0], k.device)
         x0 = torch.fft.ifftn(k, dim=(-2, -1), norm="ortho")
         x0_rss = rss(x0)
 
@@ -577,7 +585,7 @@ class CascadeXKNewv3(CascadeXKNew):
         # log gradient norm for last layers
         self.log(
             "grad_norm_x_last",
-            self.net.net.net.last[0].weight.grad.norm().item(),
+            0.0 if self.net.net.net.last[0].weight.grad is None else self.net.net.net.last[0].weight.grad.norm().item(),
             on_step=True,
             on_epoch=True,
             prog_bar=False,
@@ -585,7 +593,7 @@ class CascadeXKNewv3(CascadeXKNew):
         )
         self.log(
             "grad_norm_k_last",
-            self.net.knet.net.last[0].weight.grad.norm().item(),
+            0.0 if self.net.knet.net.last[0].weight.grad is None else self.net.knet.net.last[0].weight.grad.norm().item(),
             on_step=True,
             on_epoch=True,
             prog_bar=False,
