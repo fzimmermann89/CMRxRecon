@@ -257,7 +257,7 @@ class MappingTestDataDS(Dataset):
         csvfilename = filename.parent / f"{filename.stem}.csv"
         times = np.genfromtxt(csvfilename, delimiter=",", skip_header=1)[:, 1:].T
         times = times[: np.where(np.all(np.isnan(times), axis=1))[0][0]]
-        times = np.array(np.broadcast_to(times, (shape[2], times.shape[1]))[selection])
+        times = np.array(np.broadcast_to(times, (shape[1], times.shape[1]))[selection])
 
         k_data = self._shift(k_data_centered).transpose((2, 1, 0, 3, 4))  # (c,z,t,us,fs)
         k_data = k_data.astype(np.complex64)
