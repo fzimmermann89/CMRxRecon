@@ -57,6 +57,19 @@ class ValidationMixin(ABC):
         self.log("val_ssim", ssim_value, on_step=True, on_epoch=True, prog_bar=True, logger=True)
         self.log("val_nmse", nmse, on_step=True, on_epoch=True, prog_bar=False, logger=True)
 
+        if "roi" in batch:
+            roi = batch["roi"]
+            if torch.any(roi):
+                roi_loss = torch.nn.functional.mse_loss(prediction[roi], gt[roi])
+                roi_rss_loss = torch.nn.functional.mse_loss(rss[roi], gt[roi])
+                rest_loss = torch.nn.functional.mse_loss(prediction[~roi], gt[~roi])
+                rest_rss_loss = torch.nn.functional.mse_loss(rss[~roi], gt[~roi])
+                roi_advantage = (roi_rss_loss - roi_loss) / roi_rss_loss
+                rest_advantage = (rest_rss_loss - rest_loss) / rest_rss_loss
+                self.log("val_roi_advantage", roi_advantage, on_step=False, on_epoch=True, prog_bar=True, logger=True)
+                self.log("val_rest_advantage", rest_advantage, on_step=False, on_epoch=True, prog_bar=False, logger=True)
+            self.log("val_roi_loss", roi_loss, on_step=False, on_epoch=True, prog_bar=False, logger=True)
+
         if batch_idx == 0:
             scalemin, scalemax = gt.min().item(), gt.max().item()
 
