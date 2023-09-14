@@ -134,13 +134,13 @@ class MappingDataDS(Dataset):
         k = torch.view_as_complex(k).permute((3, 0, 2, 1, 4))
         mask = torch.as_tensor(mask[None, None, :, None])
         ret = {
+            "acceleration": float(acceleration),
+            "axis": 1.0,  # always SAX
+            "gt": gt,
+            "job": float("T1" in self.filenames[filenr].parent.parent.stem),
             "k": k,
             "mask": mask,
-            "gt": gt,
-            "acceleration": float(acceleration),
             "offset": float(offset),
-            "job": float("T1" in self.filenames[filenr].parent.parent.stem),
-            "axis": 1.0,  # always SAX
             "slice": slicevalue,
             "times": times,
         }
@@ -257,7 +257,7 @@ class MappingTestDataDS(Dataset):
         csvfilename = filename.parent / f"{filename.stem}.csv"
         times = np.genfromtxt(csvfilename, delimiter=",", skip_header=1)[:, 1:].T
         times = times[: np.where(np.all(np.isnan(times), axis=1))[0][0]]
-        times = n.array(np.broadcast_to(times, (shape[2], times.shape[1]))[selection])
+        times = np.array(np.broadcast_to(times, (shape[2], times.shape[1]))[selection])
 
         k_data = self._shift(k_data_centered).transpose((2, 1, 0, 3, 4))  # (c,z,t,us,fs)
         k_data = k_data.astype(np.complex64)
@@ -266,15 +266,15 @@ class MappingTestDataDS(Dataset):
         acceleration = float(str(filename)[acc_idx + 9 : acc_idx + 11])
 
         ret = {
+            "acceleration": acceleration,
+            "axis": 1.0,  # always SAX
+            "job": float("T1" in filename.parent.parent.stem),
             "k": k_data,
             "mask": mask,
-            "sample": (filename, selection, shape),
-            "axis": 1.0,  # always SAX
-            "acceleration": acceleration,
             "offset": 0.0,
+            "sample": (filename, selection, shape),
             "slice": slicevalue,
             "times": times,
-            "job": float("T1" in filename.parent.parent.stem),
         }
 
         return ret
