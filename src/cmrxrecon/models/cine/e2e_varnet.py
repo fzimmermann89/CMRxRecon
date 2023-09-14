@@ -107,10 +107,10 @@ def combined_loss(prediction, gt):
     l1 = nn.functional.l1_loss(prediction, gt)
     gtm = gt.amax(dim=(-1, -2), keepdim=True)
     pm = prediction.amax(dim=(-1, -2), keepdim=True)
-    l2 = nn.functional.mse_loss(prediction / pm.detach(), gt / gtm.detach())
+    l2 = nn.functional.mse_loss(prediction, gt)
     ssim_loss = -ssim(prediction, gt)
     max_loss = nn.functional.mse_loss(pm, gtm)
-    loss = 0.5 * l1 + 0.2 * l2 + 0.3 * ssim_loss + 1e-3 * max_loss
+    loss = 0.7 * l1 + 0.2 * l2 + 0.2 * ssim_loss + 1e-3 * max_loss
     return loss
 
 
@@ -118,7 +118,7 @@ class E2EVarNet(CineModel):
     def __init__(
         self,
         T: int = 4,
-        lr: float = 6e-4,
+        lr: float = 8e-4,
         weight_decay: float = 1e-4,
         schedule: bool = True,
         loss_fct: str = "l1",
