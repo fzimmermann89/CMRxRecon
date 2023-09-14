@@ -486,7 +486,7 @@ class MappingNormalizer(torch.nn.Module):
                 self.net[-1].weight *= 0.1
                 self.net[-1].bias.zero_()
         else:
-            self.net = lambda x, *args: torch.zeros(x.shape[0], times * (2 + 2 * part_inv) + emb_dim, 1, 1, 1, device=x.device)
+            self.net = lambda x, *args: torch.zeros(x.shape[0], times * (2 + 2 * part_inv), 1, 1, 1, device=x.device)
 
         if global_scale:
             self.global_net = torch.nn.Sequential(
