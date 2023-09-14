@@ -14,6 +14,7 @@ def ssim(gt, pred):
     gt = gt.view(-1, 1, gt.shape[-2], gt.shape[-1])
     pred = pred.view(-1, 1, pred.shape[-2], pred.shape[-1])
     data_range = torch.amax(gt, dim=(-1, -2))
+    data_range = torch.maximum(data_range, torch.tensor(1e-6))
     x = torch.nn.functional.unfold(gt, kernel_size=win_size, padding=0, stride=1)
     y = torch.nn.functional.unfold(pred, kernel_size=win_size, padding=0, stride=1)
     NP = win_size**2

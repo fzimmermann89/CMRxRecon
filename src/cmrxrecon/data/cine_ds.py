@@ -111,8 +111,8 @@ class CineDataDS(Dataset):
                 gt = file["sos"][selection]
             if self.return_csm:
                 csm = file["csm"][selection]
-            if slice is not None:
-                slicevale = np.arange(0, file["sos"].shape[0]) / (file["sos"].shape[0] - 1)
+            if slicenr is None:
+                slicevalue = np.arange(0, file["sos"].shape[0]) / (file["sos"].shape[0] - 1)
             else:
                 slicevalue = slicenr / (file["sos"].shape[0] - 1)
 
