@@ -167,3 +167,15 @@ cython_debug/
 
 #Lightening
 lightning_logs/
+
+trash/
+*.zip
+*.npy
+*.png
+*.ipynb
+val/
+test/
+output/
+*.mat
+
+files
