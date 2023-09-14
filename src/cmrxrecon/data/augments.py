@@ -5,7 +5,112 @@ from torch import nn
 
 
 def flip(data, dims):
+    if data is None:
+        return None
     return torch.roll(torch.flip(data, dims), (1,) * len(dims), dims)
+
+
+class MappingAugment:
+    def __init__(
+        self,
+        p_flip_spatial: float = 0.4,
+        p_shuffle_coils: float = 0.3,
+        p_phase: float = 0.5,
+        p_amp: float = 0.5,
+        std_amp: float = 0.05,
+        std_phase: float = 0.1,
+    ):
+        """
+        Augmentations for cine data
+             (Coils , Slice/view, Time, Phase Enc. (undersampled), Frequency Enc. (fully sampled))
+        """
+        self.p_flip_spatial = p_flip_spatial
+        self.p_phase = p_phase
+        self.p_shuffle_coils = p_shuffle_coils
+        self.std_amp = std_amp
+        self.std_phase = std_phase
+        self.p_amp = p_amp
+
+    def __call__(self, sample):
+        k = sample["k"]
+        gt = sample.get("gt", None)
+        csm = sample.get("csm", None)
+        roi = sample.get("roi", None)
+        roi_dilated = sample.get("roi_dilated", None)
+        flippedx, flippedy, flippedz, flippedt = 0, 0, 0, 0
+        shuffled = 0
+        phase = 0.0
+
+        if gt is not None:
+            gt = torch.as_tensor(gt)
+        if csm is not None:
+            csm = torch.as_tensor(csm)
+        if roi is not None:
+            roi = torch.as_tensor(roi)
+        if roi_dilated is not None:
+            roi_dilated = torch.as_tensor(roi_dilated)
+        k = torch.as_tensor(k)
+
+        if torch.rand(1) < self.p_flip_spatial:
+            # flip along spatial dimensions
+            r = torch.rand(1)
+            if r < 1 / 3:  # flip along fully sampled dimension
+                k = torch.fft.fft(torch.fft.fft(k, dim=-1), dim=-1, norm="forward")
+                if gt is not None:
+                    gt = flip(gt, (-1,))
+
+                csm = flip(csm, (-1,))
+                roi = flip(roi, (-1,))
+                roi_dilated = flip(roi_dilated, (-1,))
+                flippedx = 1
+            elif r < 2 / 3:  # flip along y
+                k = torch.fft.fft(torch.fft.fft(k, dim=-1), dim=-1, norm="forward")
+                k = k.conj()
+                gt = flip(gt, (-2,))
+                csm = flip(csm, (-2,))
+                roi = flip(roi, (-2,))
+                roi_dilated = flip(roi_dilated, (-2,))
+                flippedy = 1
+            else:  # flip along x and y
+                k = k.conj()
+                gt = flip(gt, (-2, -1))
+                csm = flip(csm, (-2, -1))
+                roi = flip(roi, (-2, -1))
+                roi_dilated = flip(roi_dilated, (-2, -1))
+                flippedy = 1
+                flippedx = 1
+
+        if torch.rand(1) < self.p_phase and self.std_phase > 0:
+            phase = (2 * torch.pi + (self.std_phase * torch.randn(1))) % 2 * torch.pi
+            k = k * torch.exp(1j * phase)
+            if csm is not None:
+                csm = csm * phase
+
+        if torch.rand(1) < self.p_shuffle_coils:
+            shuffle = torch.randperm(k.shape[-5])
+            k = k[..., shuffle, :, :, :, :]
+            if csm is not None:
+                csm = csm[..., shuffle, :, :, :]
+            shuffled = 1
+
+        if torch.rand(1) < self.p_amp and self.std_amp > 0:
+            factor = 1 + self.std_amp * torch.randn(1).clip_(-2, 2)
+            k = k * factor
+            if gt is not None:
+                gt = gt * factor
+
+        augmentinfo = torch.tensor([flippedx, flippedy, flippedz, flippedt, shuffled, phase])
+        sample["k"] = k.resolve_conj().contiguous()
+        if gt is not None:
+            sample["gt"] = gt.resolve_conj().contiguous()
+        sample["augmentinfo"] = augmentinfo
+        if csm is not None:
+            sample["csm"] = csm.resolve_conj().contiguous()
+        if roi is not None:
+            sample["roi"] = roi.contiguous()
+        if roi_dilated is not None:
+            sample["roi_dilated"] = roi_dilated.contiguous()
+        return sample
 
 
 class CineAugment:
