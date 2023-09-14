@@ -151,7 +151,7 @@ class CineTestDataDS(Dataset):
         self,
         path: str | Path | tuple[str | Path, ...],
         axis: str | tuple[str, ...] = ("lax", "sax"),
-        slicepersample: int = 2,
+        slicepersample: int = 1,
         return_csm: bool = False,
     ):
         """
