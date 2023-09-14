@@ -192,6 +192,11 @@ class Unet(nn.Module):
             if down_mode == "maxpool":
                 pooling_window = pooling_stride = calulate_window(dim, 2, d)
                 downsampling = partial(lambda *_, **kw: MaxPoolNd(dim)(**kw), kernel_size=pooling_window, stride=pooling_stride)
+            elif down_mode == "maxpool_pad":
+                pooling_window = pooling_stride = calulate_window(dim, 2, d)
+                downsampling = partial(
+                    lambda *_, **kw: MaxPoolNd(dim)(**kw), kernel_size=pooling_window, stride=pooling_stride, ceil_mode=True
+                )
             elif down_mode == "averagepool":
                 pooling_window = pooling_stride = calulate_window(dim, 2, d)
                 downsampling = partial(lambda *_, **kw: AvgPoolNd(dim)(**kw), kernel_size=pooling_window, stride=pooling_stride)
