@@ -187,6 +187,7 @@ class CascadeXKNew_Mapping(MappingModel):
         learned_norm_part_inv: bool = False,
         learned_norm_local_scale: bool = True,
         learned_norm_emb: bool = False,
+        version="v3",
         **kwargs,
     ):
         mapping_ft_parameters = dict(
@@ -200,42 +201,78 @@ class CascadeXKNew_Mapping(MappingModel):
         self.save_hyperparameters(mapping_ft_parameters)
 
         super().__init__()
+        if version == "v3":
+            unet_args = dict(
+                dim=2.5,
+                layer=3,
+                filters=48,
+                padding_mode="zeros",
+                residual="inner",
+                latents=(False, "film_16", "film_24", "film_32"),
+                norm="group16",
+                feature_growth=(1, 1.667, 2, 1.6, 1, 1),
+                activation="silu",
+                change_filters_last=False,
+                downsample_dimensions=((-1, -2), (-1, -2), (-1, -2, -3), (-1, -2, -3), (-1, -2, -3), (-1, -2, -3)),
+                up_mode="linear",
+                coordconv=(True, False),
+                checkpointing=(True, False),
+            )
 
-        unet_args = dict(
-            dim=2.5,
-            layer=3,
-            filters=48,
-            padding_mode="zeros",
-            residual="inner",
-            latents=(False, "film_16", "film_24", "film_32"),
-            norm="group16",
-            feature_growth=(1, 1.667, 2, 1.6, 1, 1),
-            activation="silu",
-            change_filters_last=False,
-            downsample_dimensions=((-1, -2), (-1, -2), (-1, -2, -3), (-1, -2, -3), (-1, -2, -3), (-1, -2, -3)),
-            up_mode="linear",
-            coordconv=(True, False),
-            checkpointing=(True, False),
-        )
+            k_unet_args = dict(
+                dim=2,
+                filters=64,
+                layer=2,
+                padding_mode="zeros",
+                feature_growth=(1.0, 1.25, 1.6),
+                latents=(False, "film_16", "film_24"),
+                conv_per_enc_block=3,
+                conv_per_dec_block=2,
+                downsample_dimensions=((-2,), (-1, -2)),
+                change_filters_last=False,
+                up_mode="linear_reduce",
+                residual="inner",
+                coordconv=True,
+                reszero=False,
+                norm="group16",
+                activation="silu",
+                checkpointing=(True, False),
+            )
+        elif version == "v4":
+            unet_args = dict(
+                dim=2.5,
+                layer=3,
+                filters=48,
+                padding_mode="circular",
+                residual="inner",
+                latents=(False, "film_16", "film_32", "film_48"),
+                norm="group16",
+                feature_growth=(1, 2, 2, 1.334, 1, 1),
+                activation="silu",
+                change_filters_last=False,
+                downsample_dimensions=((-1, -2), (-1, -2), (-1, -2, -3), (-1, -2, -3), (-1, -2, -3), (-1, -2, -3)),
+                coordconv=((True, False), False),
+                checkpointing=(True, False, False),
+                reszero=0.05,
+            )
 
         k_unet_args = dict(
             dim=2,
             filters=64,
             layer=2,
-            padding_mode="zeros",
-            feature_growth=(1.0, 1.25, 1.6),
-            latents=(False, "film_16", "film_24"),
+            feature_growth=(1.0, 1.5, 1.5),
+            latents=(False, "film_16", "film_32"),
             conv_per_enc_block=3,
-            conv_per_dec_block=2,
+            conv_per_dec_block=3,
             downsample_dimensions=((-2,), (-1, -2)),
             change_filters_last=False,
             up_mode="linear_reduce",
             residual="inner",
             coordconv=True,
-            reszero=False,
             norm="group16",
             activation="silu",
-            checkpointing=(True, False),
+            checkpointing=(True, False, False),
+            reszero=0.5,
         )
 
         unet_args.update(kwargs.pop("unet_args", {}))
