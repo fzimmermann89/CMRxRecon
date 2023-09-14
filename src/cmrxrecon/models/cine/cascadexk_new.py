@@ -708,7 +708,7 @@ class CascadeXKNewv4(CascadeXKNew):
         # log gradient norm for last layers
         self.log(
             "grad_norm_x_last",
-            self.net.net.net.last[0].weight.grad.norm().item(),
+            self.net.net.net.last[0].weight.grad.norm().item() if self.net.net.net.last[0].weight.grad is not None else 0.0,
             on_step=True,
             on_epoch=True,
             prog_bar=False,
@@ -716,7 +716,7 @@ class CascadeXKNewv4(CascadeXKNew):
         )
         self.log(
             "grad_norm_k_last",
-            self.net.knet.net.last[0].weight.grad.norm().item(),
+            self.net.knet.net.last[0].weight.grad.norm().item() if self.net.knet.net.last[0].weight.grad is not None else 0.0,
             on_step=True,
             on_epoch=True,
             prog_bar=False,
