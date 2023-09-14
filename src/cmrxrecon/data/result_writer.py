@@ -32,9 +32,17 @@ def create_mat_file(path):
 
 
 class OnlineValidationWriter(Callback):
-    def __init__(self, output_dir: str | None = None, resize: bool | None = None, zip: bool | None = None, swap: bool = True):
+    def __init__(
+        self,
+        output_dir: str | None = None,
+        resize: bool | None = None,
+        zip: bool | None = None,
+        swap: bool = True,
+        resize_keep_alltimes: bool = False,
+    ):
         self.path = output_dir
         self.resize = resize
+        self.resize_keep_alltimes = resize_keep_alltimes
         self.tmpdir = None
         self.zip = zip
         self.swap = swap
@@ -86,15 +94,18 @@ class OnlineValidationWriter(Callback):
         else:
             print("Predictions written to", self.path)
 
-    def write_results(self, outputs, batch, resize=True, swap=True):
+    def write_results(self, outputs, batch, resize=True, swap=True, resize_keep_alltimes=False):
         for output, sample in zip(outputs, batch["sample"]):
             filename, currentslices, shape = sample
 
             shape = [shape[i] for i in [2, 1, 3, 4]]
             data = output.detach().cpu().transpose(0, 1).numpy()
             if resize:  # resize to 1/2 in y and 1/3 in x, keep 2 slices in z and 3 in t
-                sz, sy, sx = shape[1:]
-                to_keep_t = (0, 1, 2)  # slice indices to keep
+                st, sz, sy, sx = shape
+                if resize_keep_alltimes:
+                    to_keep_t = tuple(range(st))
+                else:
+                    to_keep_t = (0, 1, 2)  # slice indices to keep
 
                 if not sz < 3:
                     to_keep_z = (round(sz / 2) - 2, round(sz / 2) - 1)  # slice indices to keep
@@ -124,7 +135,7 @@ class OnlineValidationWriter(Callback):
 
             # check if all slices are there and write to disk
             needed_slices = np.arange(shape[1])
-            existing_slices = [needed_slices[s] for s, _ in self.cache[filename]]
+            existing_slices = [np.atleast_1d(needed_slices[s]) for s, _ in self.cache[filename]]
 
             if set(np.concatenate(existing_slices)) == set(needed_slices):
                 # all slices are there, write to disk
@@ -154,14 +165,14 @@ class OnlineValidationWriter(Callback):
         else:
             resize = self.resize
 
-        self.write_results(outputs, batch, resize=resize, swap=self.swap)
+        self.write_results(outputs, batch, resize=resize, swap=self.swap, resize_keep_alltimes=self.resize_keep_alltimes)
 
     def on_predict_batch_end(self, trainer, pl_module, outputs, batch, batch_idx, dataloader_idx=0) -> None:
         if self.resize is None:
             resize = False
         else:
             resize = self.resize
-        self.write_results(outputs, batch, resize=resize, swap=self.swap)
+        self.write_results(outputs, batch, resize=resize, swap=self.swap, resize_keep_alltimes=self.resize_keep_alltimes)
 
 
 # def cropslice(oldshape, newshape) -> slice:
