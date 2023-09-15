@@ -16,7 +16,7 @@ from cmrxrecon.models.utils.multicoildc import MultiCoilDCLayer
 import gc
 from cmrxrecon.models.utils.ssim import ssim
 import torch.nn.functional as F
-from torch import conv2d, view_as_real as c2r, view_as_complex as r2c
+from torch import conv2d, dropout, view_as_real as c2r, view_as_complex as r2c
 
 from cmrxrecon.models.cine.cascadexk_new import *
 
@@ -166,9 +166,9 @@ class CascadeXKNew_Mapping(MappingModel):
 
     def __init__(
         self,
-        lr_ft=3e-5,
-        lr_rt=3e-4,
-        lr=8e-4,
+        lr_ft=6e-5,
+        lr_rt=4e-4,
+        lr=7e-4,
         weight_decay=1e-4,
         Nc: int = 10,
         T: int = 3,
@@ -176,17 +176,18 @@ class CascadeXKNew_Mapping(MappingModel):
         overwrite_k: bool = False,
         k_scaling_factor: float = 0.3,
         phase2_pct: float = 0.6,
-        mapping_l2_weight: tuple[float, float] | float = (0.2, 0.6),
+        mapping_l2_weight: tuple[float, float] | float = (0.2, 0.5),
         mapping_ssim_weight: tuple[float, float] | float = (0.5, 0.8),
         mapping_l1_weight: tuple[float, float] | float = (1.0, 0.5),
         mapping_max_weight: tuple[float, float] | float = (1e-3, 3e-3),
-        mapping_non_roi_weight: tuple[float, float] | float = (0.75, 0.5),
+        mapping_non_roi_weight: tuple[float, float] | float = (1.0, 0.75),
         cine_ckpt_path: str = "",
         learned_norm: bool = True,
         learned_norm_global_scale: bool = False,
         learned_norm_part_inv: bool = False,
         learned_norm_local_scale: bool = True,
         learned_norm_emb: bool = False,
+        learned_norm_dropout: bool = False,
         version="v3",
         **kwargs,
     ):
@@ -295,6 +296,7 @@ class CascadeXKNew_Mapping(MappingModel):
             learned_norm_part_inv=learned_norm_part_inv,
             learned_norm_local_scale=learned_norm_local_scale,
             learned_norm_emb_dim=embed_dim // 3 if learned_norm_emb else 0,
+            learned_norm_dropout=learned_norm_dropout,
             **kwargs,
         )
         self.EMANorm = EMA(alpha=0.9, max_iter=100)
@@ -361,9 +363,11 @@ class CascadeXKNew_Mapping(MappingModel):
         if w := weights["mapping_l1_weight"]:
             loss = loss + w * (F.l1_loss(prediction_roi, gt_roi) + mapping_non_roi_weight * F.l1_loss(prediction_rest, gt_rest))
         if w := weights["mapping_max_weight"]:
-            max_penalty_roi = F.mse_loss(gt_roi.amax(dim=(-1, -2)), prediction_roi.amax(dim=(-1, -2)))
-            max_penalty_rest = F.mse_loss(gt_rest.amax(dim=(-1, -2)), prediction_rest.amax(dim=(-1, -2)))
-            loss = loss + w * (max_penalty_roi + mapping_non_roi_weight * max_penalty_rest)
+            max_penalty = F.mse_loss(gt.amax(dim=(-1, -2)), prediction.amax(dim=(-1, -2)))
+            loss = loss + w * max_penalty
+            # max_penalty_roi = F.mse_loss(gt_roi.amax(dim=(-1, -2)), prediction_roi.amax(dim=(-1, -2)))
+            # max_penalty_rest = F.mse_loss(gt_rest.amax(dim=(-1, -2)), prediction_rest.amax(dim=(-1, -2)))
+            # loss = loss + w * (max_penalty_roi + mapping_non_roi_weight * max_penalty_rest)
         if (rss_loss_roi := rss_loss_roi.item()) > 1e-6:
             self.log(
                 "train_advantage_roi",
@@ -445,6 +449,7 @@ class CNNWrapper_Mapping(torch.nn.Module):
         learned_norm_part_inv=False,
         learned_norm_local_scale=True,
         learned_norm_emb_dim=64,
+        learned_norm_dropout=False,
     ):
         super().__init__()
         self.net = net
@@ -460,6 +465,7 @@ class CNNWrapper_Mapping(torch.nn.Module):
                         part_inv=learned_norm_part_inv,
                         local_scale=learned_norm_local_scale,
                         emb_dim=learned_norm_emb_dim,
+                        dropout=learned_norm_dropout,
                     )
                     for t in (9, 3)
                 ]
@@ -501,7 +507,7 @@ class CNNWrapper_Mapping(torch.nn.Module):
 
 
 class MappingNormalizer(torch.nn.Module):
-    def __init__(self, times, vc=4, Nc=10, global_scale=False, part_inv=False, emb_dim=64, local_scale=True):
+    def __init__(self, times, vc=4, Nc=10, global_scale=False, part_inv=False, emb_dim=64, local_scale=True, dropout=False):
         super().__init__()
         self.times = times
         self.global_scale = global_scale
@@ -515,6 +521,7 @@ class MappingNormalizer(torch.nn.Module):
             self.net = torch.nn.Sequential(
                 torch.nn.Conv3d((vc + 1) * times, 64, kernel_size=(1, 3, 3), padding="same"),
                 torch.nn.LeakyReLU(inplace=True),
+                torch.nn.Dropout3d(p=0.1, inplace=True) if dropout else torch.nn.Identity(),
                 torch.nn.Conv3d(64, 128, kernel_size=(1, 3, 3), padding="same"),
                 torch.nn.LeakyReLU(inplace=True),
                 torch.nn.Conv3d(128, times * (2 + 2 * part_inv), kernel_size=(1, 1, 1)),
@@ -529,6 +536,7 @@ class MappingNormalizer(torch.nn.Module):
             self.global_net = torch.nn.Sequential(
                 torch.nn.Linear((vc + 1) * 4 + emb_dim, 64),
                 torch.nn.LeakyReLU(inplace=True),
+                torch.nn.Dropout(p=0.2, inplace=True) if dropout else torch.nn.Identity(),
                 torch.nn.Linear(64, 64),
                 torch.nn.LeakyReLU(inplace=True),
                 torch.nn.Linear(64, 2),
@@ -594,8 +602,8 @@ class MappingNormalizer(torch.nn.Module):
     def global_part(self, x, shape, emb):
         #  (b z t) c ->  b 2 z t 1 1
         x_mean = x.mean(dim=(-1, 2))
-        x_max = x.amax(dim=(-1, 2))
-        x_min = x.amin(dim=(-1, 2))
+        x_max = x.amax(dim=(-1, 2)).detach()
+        x_min = x.amin(dim=(-1, 2)).detach()
         x_std = x.std(dim=(-1, 2))
         xn = torch.cat((x_mean, x_max, x_min, -x_std), dim=1)
         if self.emb_dim > 0:
