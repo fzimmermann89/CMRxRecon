@@ -192,7 +192,8 @@ class CineData(pl.LightningDataModule):
             self.test_dataset,
             shuffle=False,
             batch_size=1,
-            num_workers=8,
+            num_workers=16,
+            prefetch_factor=2,
             collate_fn=lambda batch: torch.utils.data._utils.collate.collate(
                 batch,
                 collate_fn_map={**torch.utils.data._utils.collate.default_collate_fn_map, tuple: lambda x, *args, **kwargs: x},
@@ -383,7 +384,8 @@ class MappingData(pl.LightningDataModule):
             self.test_dataset,
             shuffle=False,
             batch_size=1,
-            num_workers=8,
+            num_workers=16,
+            prefetch_factor=2,
             collate_fn=lambda batch: torch.utils.data._utils.collate.collate(
                 batch,
                 collate_fn_map={**torch.utils.data._utils.collate.default_collate_fn_map, tuple: lambda x, *args, **kwargs: x},
