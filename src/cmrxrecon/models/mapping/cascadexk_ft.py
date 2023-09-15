@@ -187,7 +187,7 @@ class CascadeXKNew_Mapping(MappingModel):
         learned_norm_part_inv: bool = False,
         learned_norm_local_scale: bool = True,
         learned_norm_emb: bool = False,
-        learned_norm_dropout: bool = False,
+        learned_norm_dropout: bool = None,
         version="v3",
         **kwargs,
     ):
@@ -518,14 +518,18 @@ class MappingNormalizer(torch.nn.Module):
         self.comp = torch.nn.Conv2d(Nc, vc, kernel_size=(1, 2))
 
         if local_scale:
-            self.net = torch.nn.Sequential(
+            layers = [
                 torch.nn.Conv3d((vc + 1) * times, 64, kernel_size=(1, 3, 3), padding="same"),
                 torch.nn.LeakyReLU(inplace=True),
                 torch.nn.Dropout3d(p=0.1, inplace=True) if dropout else torch.nn.Identity(),
                 torch.nn.Conv3d(64, 128, kernel_size=(1, 3, 3), padding="same"),
                 torch.nn.LeakyReLU(inplace=True),
                 torch.nn.Conv3d(128, times * (2 + 2 * part_inv), kernel_size=(1, 1, 1)),
-            )
+            ]
+            if dropout is None:
+                # for compatibility with old checkpoints, drop the dropout layers
+                layers.pop(2)
+            self.net = torch.nn.Sequential(*layers)
             with torch.no_grad():
                 self.net[-1].weight *= 0.1
                 self.net[-1].bias.zero_()
@@ -533,14 +537,18 @@ class MappingNormalizer(torch.nn.Module):
             self.net = lambda x, *args: torch.zeros(x.shape[0], times * (2 + 2 * part_inv), 1, 1, 1, device=x.device)
 
         if global_scale:
-            self.global_net = torch.nn.Sequential(
+            layers = [
                 torch.nn.Linear((vc + 1) * 4 + emb_dim, 64),
                 torch.nn.LeakyReLU(inplace=True),
                 torch.nn.Dropout(p=0.2, inplace=True) if dropout else torch.nn.Identity(),
                 torch.nn.Linear(64, 64),
                 torch.nn.LeakyReLU(inplace=True),
                 torch.nn.Linear(64, 2),
-            )
+            ]
+            if dropout is None:
+                # for compatibility with old checkpoints, drop the dropout layers
+                layers.pop(2)
+            self.global_net = torch.nn.Sequential(*layers)
             with torch.no_grad():
                 self.global_net[-1].weight *= 0.1
                 self.global_net[-1].bias.zero_()
