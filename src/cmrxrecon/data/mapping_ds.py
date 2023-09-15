@@ -268,7 +268,7 @@ class MappingTestDataDS(Dataset):
         ret = {
             "acceleration": acceleration,
             "axis": 1.0,  # always SAX
-            "job": float("T1" in filename.parent.parent.stem),
+            "job": float("T1" in filename.stem),
             "k": k_data,
             "mask": mask,
             "offset": 0.0,
