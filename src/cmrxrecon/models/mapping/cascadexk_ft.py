@@ -45,6 +45,7 @@ class MappingCascadeNet(CascadeNet):
         learned_norm_part_inv: bool = False,
         learned_norm_local_scale: bool = True,
         learned_norm_emb_dim: int = 0,
+        learned_norm_dropout: bool = None,
         **kwargs,
     ):
         super().__init__()
@@ -66,6 +67,7 @@ class MappingCascadeNet(CascadeNet):
             learned_norm_part_inv=learned_norm_part_inv,
             learned_norm_local_scale=learned_norm_local_scale,
             learned_norm_emb_dim=learned_norm_emb_dim,
+            learned_norm_dropout=learned_norm_dropout,
         )
         self.knet = KCNNWrapper(knet, k_scaling_factor=k_scaling_factor)
 
@@ -521,7 +523,7 @@ class MappingNormalizer(torch.nn.Module):
             layers = [
                 torch.nn.Conv3d((vc + 1) * times, 64, kernel_size=(1, 3, 3), padding="same"),
                 torch.nn.LeakyReLU(inplace=True),
-                torch.nn.Dropout3d(p=0.1, inplace=True) if dropout else torch.nn.Identity(),
+                torch.nn.Dropout3d(p=0.1, inplace=False) if dropout else torch.nn.Identity(),
                 torch.nn.Conv3d(64, 128, kernel_size=(1, 3, 3), padding="same"),
                 torch.nn.LeakyReLU(inplace=True),
                 torch.nn.Conv3d(128, times * (2 + 2 * part_inv), kernel_size=(1, 1, 1)),
@@ -540,7 +542,7 @@ class MappingNormalizer(torch.nn.Module):
             layers = [
                 torch.nn.Linear((vc + 1) * 4 + emb_dim, 64),
                 torch.nn.LeakyReLU(inplace=True),
-                torch.nn.Dropout(p=0.2, inplace=True) if dropout else torch.nn.Identity(),
+                torch.nn.Dropout(p=0.2, inplace=False) if dropout else torch.nn.Identity(),
                 torch.nn.Linear(64, 64),
                 torch.nn.LeakyReLU(inplace=True),
                 torch.nn.Linear(64, 2),
