@@ -514,22 +514,26 @@ class CascadeXKAblation(CineModel):
 class CascadeXKAblationv4(CascadeXKAblation):
     def on_before_optimizer_step(self, optimizer):
         # log gradient norm for last layers
-        self.log(
-            "grad_norm_x_last",
-            self.net.net.net.last[0].weight.grad.norm().item() if self.net.net.net.last[0].weight.grad is not None else 0.0,
-            on_step=True,
-            on_epoch=True,
-            prog_bar=False,
-            logger=True,
-        )
-        self.log(
-            "grad_norm_k_last",
-            self.net.knet.net.last[0].weight.grad.norm().item() if self.net.knet.net.last[0].weight.grad is not None else 0.0,
-            on_step=True,
-            on_epoch=True,
-            prog_bar=False,
-            logger=True,
-        )
+        if self.net.net is not None:
+            self.log(
+                "grad_norm_x_last",
+                self.net.net.net.last[0].weight.grad.norm().item() if self.net.net.net.last[0].weight.grad is not None else 0.0,
+                on_step=True,
+                on_epoch=True,
+                prog_bar=False,
+                logger=True,
+            )
+        if self.net.knet is not None:
+            self.log(
+                "grad_norm_k_last",
+                self.net.knet.net.last[0].weight.grad.norm().item()
+                if self.net.knet.net.last[0].weight.grad is not None
+                else 0.0,
+                on_step=True,
+                on_epoch=True,
+                prog_bar=False,
+                logger=True,
+            )
         # log lr
         self.log("lr", optimizer.param_groups[0]["lr"], on_step=True, on_epoch=True, prog_bar=False, logger=True)
 
