@@ -214,7 +214,7 @@ class CascadeNet(torch.nn.Module):
 
     def forward(self, k: torch.Tensor, mask: torch.Tensor, **other) -> dict:
         # get all the conditioning information or defaults
-        static_info = self.conditioning_info(other, k.shape[0], k.device)
+        static_info = self.conditioning_info(other, k.shape[0], k.device) if self.embed_net is not None else None
         x0 = torch.fft.ifftn(k, dim=(-2, -1), norm="ortho")
         x0_rss = rss(x0)
 
