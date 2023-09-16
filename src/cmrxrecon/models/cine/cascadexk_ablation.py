@@ -179,7 +179,7 @@ class CascadeNet(torch.nn.Module):
             self.knet = None
 
         if embed_dim == 0:
-            self.lambda_weight = torch.nn.Parameter(torch.tensor(lambda_init))
+            self.lambda_weight = torch.nn.Parameter(torch.ones(1, 1) * lambda_init)
             lambda_init = 0.0
             self.embed_net = None
 
@@ -542,22 +542,22 @@ class CascadeXKAblationv4(CascadeXKAblation):
         T: int = 3,
         embed_dim=192,
         phase2_pct: float = 0.5,
-        l2_weight: tuple[float, float] | float = (0.1, 0.5),
-        ssim_weight: tuple[float, float] | float = (0, 0.4),
+        l2_weight: tuple[float, float] | float = 0.2,
+        ssim_weight: tuple[float, float] | float = 0.5,
         greedy_weight: tuple[float, float] | float = (0, 0),
-        l1_weight: tuple[float, float] | float = (0.3, 0.6),
+        l1_weight: tuple[float, float] | float = 0.6,
         charbonnier_weight: tuple[float, float] | float = 0.0,
-        max_weight: tuple[float, float] | float = (1e-4, 1e-3),
-        l1_coilwise_weight: tuple[float, float] | float = (2.0, 0.0),
-        l2_coilwise_weight: tuple[float, float] | float = (2.0, 0.5),
-        l2_k_weight: tuple[float, float] | float = (0.2, 0.05),
-        greedy_coilwise_weight: tuple[float, float] | float = (0.8, 0.1),
+        max_weight: tuple[float, float] | float = 3e-4,
+        l1_coilwise_weight: tuple[float, float] | float = 0.0,
+        l2_coilwise_weight: tuple[float, float] | float = 0.0,
+        l2_k_weight: tuple[float, float] | float = 0.0,
+        greedy_coilwise_weight: tuple[float, float] | float = 0.0,
         lambda_init: float = 0.4,
         overwrite_k: bool = False,
         knet_init=0.01,
         xnet_init=1,
-        ss_weight: tuple[float, float] | float = (1.5, 0.2),
-        greedy_ss_weight: tuple[float, float] | float = (0.2, 0.0),
+        ss_weight: tuple[float, float] | float = 1.0,
+        greedy_ss_weight: tuple[float, float] | float = 0.0,
         k_loss_scaling_factor: float = 0.3,
         k_scaling_factor: float = 0.4,
         ablation_no_emb: bool = False,
