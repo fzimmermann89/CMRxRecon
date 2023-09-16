@@ -1,6 +1,16 @@
 import torch
 
 
+class _OffsetLayer(torch.nn.Module):
+    # ugly hack to add an offset to the input in a torchscript compatible way
+    def __init__(self, offset: float):
+        super().__init__()
+        self.offset = offset
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return x + self.offset
+
+
 class MultiCoilDCLayer(torch.nn.Module):
     def __init__(
         self,
@@ -35,7 +45,7 @@ class MultiCoilDCLayer(torch.nn.Module):
                 self.lambda_proj.weight.zero_()
                 self.lambda_proj.bias[:] = lambda_init
         else:
-            self.lambda_proj = lambda x: x + lambda_init
+            self.lambda_proj = _OffsetLayer(lambda_init)
 
         def parse_dims(k_dims: bool | tuple[bool, ...]) -> tuple[int, ...]:
             if k_dims == False:
