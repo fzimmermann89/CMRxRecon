@@ -173,7 +173,9 @@ class CineTestDataDS(Dataset):
             path = (Path(path),)
         if isinstance(axis, str):
             axis = (axis,)
-        self.filenames = sorted(sum([list(Path(p).rglob(f"cine_{ax}.mat")) for p in path for ax in axis], []))
+        filenames = sorted(sum([list(Path(p).rglob(f"cine_{ax}.mat")) for p in path for ax in axis], []))
+
+        self.filenames = [filename for filename in filenames if "AccFactor" in str(filename)]
 
         shapes = [self._getdata(fn).shape for fn in self.filenames]
         slices = np.array([s[1] for s in shapes])
@@ -230,8 +232,11 @@ class CineTestDataDS(Dataset):
         k_data = k_data.astype(np.complex64)
         mask = (~np.isclose(k_data[0, ..., :, :1], 0)).astype(np.float32)
         axis = float("sax" in filename.stem.split("_")[-1])
-        acc_idx = str(filename).find("AccFactor")
-        acceleration = float(str(filename)[acc_idx + 9 : acc_idx + 11])
+        try:
+            acc_idx = str(filename).find("AccFactor")
+            acceleration = float(str(filename)[acc_idx + 9 : acc_idx + 11])
+        except:
+            acceleration = 8.0
 
         ret = {
             "k": k_data,

@@ -202,7 +202,8 @@ class MappingTestDataDS(Dataset):
             path = (Path(path),)
         if isinstance(job, str):
             job = (job,)
-        self.filenames = sorted(sum([list(Path(p).rglob(f"{j.capitalize()}map.mat")) for p in path for j in job], []))
+        filenames = sorted(sum([list(Path(p).rglob(f"{j.capitalize()}map.mat")) for p in path for j in job], []))
+        self.filenames = [filename for filename in filenames if "AccFactor" in str(filename)]
 
         shapes = [self._getdata(fn).shape for fn in self.filenames]
         slices = np.array([s[1] for s in shapes])
@@ -254,16 +255,26 @@ class MappingTestDataDS(Dataset):
             slicevalue = slicenr / (data.shape[1] - 1)
             if len(slicevalue) == 1:
                 slicevalue = slicevalue[0]
-        csvfilename = filename.parent / f"{filename.stem}.csv"
-        times = np.genfromtxt(csvfilename, delimiter=",", skip_header=1)[:, 1:].T
-        times = times[: np.where(np.all(np.isnan(times), axis=1))[0][0]]
-        times = np.array(np.broadcast_to(times, (shape[1], times.shape[1]))[selection])
+        try:
+            csvfilename = filename.parent / f"{filename.stem}.csv"
+            times = np.genfromtxt(csvfilename, delimiter=",", skip_header=1)[:, 1:].T
+            times = times[: np.where(np.all(np.isnan(times), axis=1))[0][0]]
+            times = np.array(np.broadcast_to(times, (shape[1], times.shape[1]))[selection])
+        except:
+            job_T1 = float("T1" in filename.stem)
+            if job_T1:
+                times = np.array([[100.0, 180.0, 260.0, 1245.0, 1323.0, 1340.0, 2395.0, 2450.0, 3550.0]])
+            else:
+                times = np.array([[0.0, 35.0, 55.0]])
 
         k_data = self._shift(k_data_centered).transpose((2, 1, 0, 3, 4))  # (c,z,t,us,fs)
         k_data = k_data.astype(np.complex64)
         mask = (~np.isclose(k_data[0, ..., :, :1], 0)).astype(np.float32)
-        acc_idx = str(filename).find("AccFactor")
-        acceleration = float(str(filename)[acc_idx + 9 : acc_idx + 11])
+        try:
+            acc_idx = str(filename).find("AccFactor")
+            acceleration = float(str(filename)[acc_idx + 9 : acc_idx + 11])
+        except:
+            acceleration = 8
 
         ret = {
             "acceleration": acceleration,
