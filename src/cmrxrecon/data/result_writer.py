@@ -39,6 +39,7 @@ class OnlineValidationWriter(Callback):
         zip: bool | None = None,
         swap: bool = True,
         resize_keep_alltimes: bool = False,
+        zipstr=None,
     ):
         self.path = output_dir
         self.resize = resize
@@ -47,6 +48,7 @@ class OnlineValidationWriter(Callback):
         self.zip = zip
         self.swap = swap
         self.cache = defaultdict(list)
+        self.zipstr = zipstr
 
     def on_test_start(self, trainer, pl_module) -> None:
         if self.zip is None:
@@ -70,16 +72,16 @@ class OnlineValidationWriter(Callback):
         if self.path is None:
             self.path = Path("./output")
 
-    def create_zip(self, modelname, mode):
+    def create_zip(self, modelname, zipstr=""):
         timestamp = time.strftime("%Y%m%d_%H%M%S")
-        filename = f"MultiCoil_{mode}_{modelname}_{timestamp}"
+        filename = f"MultiCoil_{zipstr}_{modelname}_{timestamp}"
         shutil.make_archive(str(self.path / filename), "zip", self.tmpdir)
         return (self.path / (filename + ".zip")).absolute()
 
     def on_predict_end(self, trainer, pl_module) -> None:
         modelname = pl_module.__class__.__name__
         if self.zip:
-            f = self.create_zip(modelname, mode="predict")
+            f = self.create_zip(modelname, zipstr="predict" if self.zipstr is None else self.zipstr)
             print("Predictions written to", f)
             shutil.rmtree(self.tmpdir)
         else:
@@ -88,7 +90,7 @@ class OnlineValidationWriter(Callback):
     def on_test_end(self, trainer, pl_module) -> None:
         modelname = pl_module.__class__.__name__
         if self.zip:
-            f = self.create_zip(modelname, mode="test")
+            f = self.create_zip(modelname, zipstr="test" if self.zipstr is None else self.zipstr)
             print("Predictions written to", f)
             shutil.rmtree(self.tmpdir)
         else:
