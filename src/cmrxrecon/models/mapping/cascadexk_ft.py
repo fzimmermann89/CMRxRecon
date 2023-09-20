@@ -193,7 +193,7 @@ class CascadeXKNew_Mapping(MappingModel):
         learned_norm_local_scale: bool = True,
         learned_norm_emb: bool = False,
         learned_norm_dropout: bool = None,
-        learned_norm_after_real:bool=True
+        learned_norm_after_real: bool = True,
         version="v3",
         **kwargs,
     ):

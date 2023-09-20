@@ -274,7 +274,7 @@ class MappingTestDataDS(Dataset):
             acc_idx = str(filename).find("AccFactor")
             acceleration = float(str(filename)[acc_idx + 9 : acc_idx + 11])
         except:
-            acceleration = 8
+            acceleration = 8.0
 
         ret = {
             "acceleration": acceleration,
