@@ -499,7 +499,7 @@ class CNNWrapper_Mapping(torch.nn.Module):
             x_net = x_net * torch.view_as_real(normfactor)
             return r2c(xr + x_net)
         else:
-            return r2c(x_net) * normfactor + r2c(xr)
+            return r2c(x_net.contiguous()) * normfactor + r2c(xr)
 
     def forward(self, x: torch.Tensor, *args, emb, x_rss=None, **kwargs) -> tuple[torch.Tensor, torch.Tensor] | torch.Tensor:
         if self.time_normalizer is not None:
