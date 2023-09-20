@@ -1,6 +1,7 @@
 from cmath import phase
 import re
 from typing import Any, Mapping
+from xmlrpc.client import boolean
 import torch
 from einops import rearrange
 from .base import MappingModel
@@ -46,6 +47,7 @@ class MappingCascadeNet(CascadeNet):
         learned_norm_local_scale: bool = True,
         learned_norm_emb_dim: int = 0,
         learned_norm_dropout: bool = None,
+        learned_norm_after_real: bool = True,
         **kwargs,
     ):
         super().__init__()
@@ -68,6 +70,7 @@ class MappingCascadeNet(CascadeNet):
             learned_norm_local_scale=learned_norm_local_scale,
             learned_norm_emb_dim=learned_norm_emb_dim,
             learned_norm_dropout=learned_norm_dropout,
+            learned_norm_after_real=learned_norm_after_real,
         )
         self.knet = KCNNWrapper(knet, k_scaling_factor=k_scaling_factor)
 
@@ -190,6 +193,7 @@ class CascadeXKNew_Mapping(MappingModel):
         learned_norm_local_scale: bool = True,
         learned_norm_emb: bool = False,
         learned_norm_dropout: bool = None,
+        learned_norm_after_real:bool=True
         version="v3",
         **kwargs,
     ):
@@ -299,11 +303,12 @@ class CascadeXKNew_Mapping(MappingModel):
             learned_norm_local_scale=learned_norm_local_scale,
             learned_norm_emb_dim=embed_dim // 3 if learned_norm_emb else 0,
             learned_norm_dropout=learned_norm_dropout,
+            learned_norm_after_real=learned_norm_after_real,
             **kwargs,
         )
         self.EMANorm = EMA(alpha=0.9, max_iter=100)
 
-        if cine_ckpt_path != "":
+        if cine_ckpt_path != "" and cine_ckpt_path != "''":
             print("Loading Cine checkpoint")
             ckpt = torch.load(cine_ckpt_path, map_location="cpu")
             (knet, xnet, dc, embed, ema), rest = split_state_dict(
@@ -452,6 +457,7 @@ class CNNWrapper_Mapping(torch.nn.Module):
         learned_norm_local_scale=True,
         learned_norm_emb_dim=64,
         learned_norm_dropout=False,
+        learned_norm_after_real=True,
     ):
         super().__init__()
         self.net = net
@@ -474,6 +480,7 @@ class CNNWrapper_Mapping(torch.nn.Module):
             )
         else:
             self.time_normalizer = None
+        self.after_real = learned_norm_after_real
 
     @staticmethod
     def before(x: torch.Tensor, x_rss=None) -> tuple[torch.Tensor, torch.Tensor] | torch.Tensor:
@@ -486,10 +493,13 @@ class CNNWrapper_Mapping(torch.nn.Module):
         return net_input, xr
 
     @staticmethod
-    def after(x_net: torch.Tensor, xr: torch.Tensor, normfactor: torch.Tensor) -> torch.Tensor:
+    def after(x_net: torch.Tensor, xr: torch.Tensor, normfactor: torch.Tensor, real=True) -> torch.Tensor:
         x_net = rearrange(x_net, "(b z) (r c) t x y -> b c z t x y r", b=len(xr), r=2)
-        x_net = x_net * torch.view_as_real(normfactor)
-        return r2c(xr + x_net)
+        if real:
+            x_net = x_net * torch.view_as_real(normfactor)
+            return r2c(xr + x_net)
+        else:
+            return r2c(x_net) * normfactor + r2c(xr)
 
     def forward(self, x: torch.Tensor, *args, emb, x_rss=None, **kwargs) -> tuple[torch.Tensor, torch.Tensor] | torch.Tensor:
         if self.time_normalizer is not None:
@@ -500,12 +510,12 @@ class CNNWrapper_Mapping(torch.nn.Module):
                 raise ValueError(f"Cannot find normalizer for times {x.shape[3]}")
             x, normfactor = norm(x, emb)
         else:
-            normfactor = 1.0
+            normfactor = 1.0 if not self.after_real else torch.tensor(1.0 + 1j).to(x.device)
 
         run = lambda f, *args: torch.utils.checkpoint.checkpoint(f, *args, use_reentrant=False) if self.chkpt else f(*args)
         net_input, xr = run(self.before, x, x_rss)
         x_net, h = self.net(net_input, *args, emb=emb, **kwargs)
-        return run(self.after, x_net, xr, normfactor), h
+        return run(self.after, x_net, xr, normfactor, self.after_real), h
 
 
 class MappingNormalizer(torch.nn.Module):
