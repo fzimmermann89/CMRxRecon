@@ -1,5 +1,10 @@
 Submission for the CMRxRecon STACOM@MICCAI 2023 Challenge
 
-Felix F Zimmermann, Andreas Kofler
-felix.zimmermann@ptb.de andreas.kofler@ptb.de
-Physikalisch Technische Bundesanstalt (PTB) Berlin, Abt. 8.1
+[Paper](https://link.springer.com/chapter/10.1007/978-3-031-52448-6_43) [Arxiv](https://arxiv.org/abs/2309.15608)
+
+Our final submission / results in the paper were obtained with
+CascadeXKNewv4 and CascadeXKNew_Mapping, respectively
+
+
+Felix F Zimmermann (felix.zimmermann@ptb.de), Andreas Kofler ( andreas.kofler@ptb.de)
+Physikalisch Technische Bundesanstalt (PTB) Berlin
